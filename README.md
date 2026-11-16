@@ -22,3 +22,9 @@ Workflow:
 
 - `main` is protected; changes land only through pull requests from development branches (`feat/…`, `fix/…`, `chore/…`, `docs/…`).
 - Everything in the repository is written in English. User-facing UI copy is Italian.
+
+## License
+
+No license is granted. All rights reserved.
+
+The source code is publicly visible for transparency only: you may read it, but you may not copy, modify, redistribute or use it without the author's written permission.
