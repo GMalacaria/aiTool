@@ -28,7 +28,15 @@ import {
 import type { AppEnv, UserStatus } from './env';
 import { getRouter } from './llm/providers';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
-import { consumeMessage, currentDay, getUsedMessages, refundMessage } from './usage';
+import {
+  consumeDeepMessage,
+  consumeMessage,
+  currentDay,
+  getUsedDeepMessages,
+  getUsedMessages,
+  refundDeepMessage,
+  refundMessage,
+} from './usage';
 
 const STATE_COOKIE = 'oauth_state';
 const STATUSES: UserStatus[] = ['pending', 'approved', 'blocked'];
@@ -106,7 +114,9 @@ app.post('/auth/logout', async (c) => {
 
 app.get('/me', requireUser, async (c) => {
   const user = c.get('user');
-  const used = user.status === 'approved' ? await getUsedMessages(c.env.DB, user, currentDay()) : 0;
+  const approved = user.status === 'approved';
+  const used = approved ? await getUsedMessages(c.env.DB, user, currentDay()) : 0;
+  const deepUsed = approved ? await getUsedDeepMessages(c.env.DB, user, currentDay()) : 0;
   return c.json({
     name: user.name,
     email: user.email,
@@ -114,6 +124,8 @@ app.get('/me', requireUser, async (c) => {
     isAdmin: user.isAdmin,
     dailyLimit: user.dailyMessageLimit,
     remaining: Math.max(0, user.dailyMessageLimit - used),
+    deepLimit: user.dailyDeepLimit,
+    deepRemaining: Math.max(0, user.dailyDeepLimit - deepUsed),
   });
 });
 
@@ -173,32 +185,49 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
   const used = await consumeMessage(db, user, day);
   if (used === null) return c.json({ error: 'daily_limit_reached' }, 429);
 
+  // In-depth answers come from a separate allowance; without it the answer is a standard one.
+  let deep = request.deep && (await consumeDeepMessage(db, user, day)) !== null;
+
   try {
     const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
-    const remaining = Math.max(0, user.dailyMessageLimit - used);
     const { attachments } = request;
     const stored = hasAttachments(attachments) ? toStored(attachments) : null;
 
-    if (request.format === 'document') {
-      const document = await createDocument(getRouter(c.env), history, request.message, attachments);
-      const conversation = await saveExchange(
-        db,
-        user,
-        request.conversationId,
-        request.message,
-        JSON.stringify(document),
-        'document',
-        stored,
-      );
-      return c.json({ answer: document.title, document, remaining, conversation });
+    const generate = async (useDeep: boolean) => {
+      const routers = { draft: getRouter(c.env, useDeep ? 'deep' : 'standard'), review: getRouter(c.env), deep: useDeep };
+      return request.format === 'document'
+        ? { document: await createDocument(routers.draft, history, request.message, attachments) }
+        : { text: await answer(routers, history, request.message, attachments) };
+    };
+
+    let result: Awaited<ReturnType<typeof generate>>;
+    try {
+      result = await generate(deep);
+    } catch (error) {
+      if (!deep) throw error;
+      // The in-depth model is unavailable: give the allowance back and answer normally.
+      console.warn('in-depth model failed, falling back', error);
+      await refundDeepMessage(db, user, day);
+      deep = false;
+      result = await generate(false);
     }
 
-    const text = await answer(getRouter(c.env), history, request.message, attachments);
-    const conversation = await saveExchange(db, user, request.conversationId, request.message, text, 'text', stored);
-    return c.json({ answer: text, remaining, conversation });
+    const conversation = result.document
+      ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored)
+      : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored);
+
+    return c.json({
+      answer: result.document ? result.document.title : result.text,
+      document: result.document,
+      deep,
+      remaining: Math.max(0, user.dailyMessageLimit - used),
+      deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),
+      conversation,
+    });
   } catch (error) {
     console.error('chat failed', error);
     await refundMessage(db, user, day);
+    if (deep) await refundDeepMessage(db, user, day);
     return c.json({ error: 'service_unavailable' }, 503);
   }
 });
@@ -207,7 +236,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
 app.get('/admin/users', requireUser, requireAdmin, async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, created_at AS createdAt
+    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, daily_deep_limit AS deepLimit,
+            created_at AS createdAt
      FROM users ORDER BY status = 'pending' DESC, created_at DESC`,
   ).all<{ email: string }>();
   return c.json({ users: results.map((row) => ({ ...row, isAdmin: isAdminEmail(c.env, row.email) })) });
@@ -215,7 +245,11 @@ app.get('/admin/users', requireUser, requireAdmin, async (c) => {
 
 app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
   const id = Number(c.req.param('id'));
-  const body = ((await c.req.json().catch(() => null)) ?? {}) as { status?: unknown; dailyLimit?: unknown };
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as {
+    status?: unknown;
+    dailyLimit?: unknown;
+    deepLimit?: unknown;
+  };
 
   const target = Number.isInteger(id)
     ? await c.env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(id).first<{ email: string }>()
@@ -224,15 +258,20 @@ app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
 
   // Administrators are always approved: their status cannot be changed.
   const status = isAdminEmail(c.env, target.email) ? undefined : STATUSES.find((candidate) => candidate === body.status);
-  const dailyLimit = body.dailyLimit;
-  const validLimit = typeof dailyLimit === 'number' && Number.isInteger(dailyLimit) && dailyLimit >= 0 && dailyLimit <= 500;
+  const limit = (value: unknown, max: number) =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : null;
+  const dailyLimit = limit(body.dailyLimit, 500);
+  const deepLimit = limit(body.deepLimit, 100);
 
-  if (!status && !validLimit) return c.json({ error: 'invalid_request' }, 400);
+  if (!status && dailyLimit === null && deepLimit === null) return c.json({ error: 'invalid_request' }, 400);
 
   await c.env.DB.prepare(
-    'UPDATE users SET status = COALESCE(?1, status), daily_message_limit = COALESCE(?2, daily_message_limit) WHERE id = ?3',
+    `UPDATE users SET status = COALESCE(?1, status),
+       daily_message_limit = COALESCE(?2, daily_message_limit),
+       daily_deep_limit = COALESCE(?3, daily_deep_limit)
+     WHERE id = ?4`,
   )
-    .bind(status ?? null, validLimit ? dailyLimit : null, id)
+    .bind(status ?? null, dailyLimit, deepLimit, id)
     .run();
 
   // A user who is no longer approved loses the open sessions too.

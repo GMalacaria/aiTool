@@ -10,7 +10,7 @@ import {
 } from './chat';
 import { titleFrom } from './conversations';
 import type { ChatMessage, ProviderRouter } from './llm/router';
-import { applyReview, DOCUMENT_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, SYSTEM_PROMPT } from './prompts';
+import { applyReview, DEEP_INSTRUCTION, DOCUMENT_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, SYSTEM_PROMPT } from './prompts';
 import { detectSensitiveTopic } from './sensitive';
 import { currentDay } from './usage';
 
@@ -25,6 +25,7 @@ describe('parseChatRequest', () => {
       message: 'hello',
       format: 'text',
       attachments: { documents: [], images: [] },
+      deep: false,
     });
   });
 
@@ -34,6 +35,7 @@ describe('parseChatRequest', () => {
       message: 'hi',
       format: 'document',
       attachments: { documents: [], images: [] },
+      deep: false,
     });
   });
 
@@ -44,6 +46,7 @@ describe('parseChatRequest', () => {
     ['non-string message', { message: 42 }],
     ['malformed conversation id', { conversationId: 'abc', message: 'hi' }],
     ['unknown format', { message: 'hi', format: 'image' }],
+    ['non-boolean deep flag', { message: 'hi', deep: 'yes' }],
     ['invalid attachments', { message: 'hi', attachments: { images: [{ name: 'x', dataUrl: 'https://evil.test/x.png' }] } }],
     ['non-object payload', null],
   ])('rejects %s', (_label, payload) => {
@@ -94,14 +97,15 @@ describe('answer', () => {
       if (reply instanceof Error || reply === undefined) throw reply ?? new Error('no reply');
       return reply;
     });
-    return { router: { complete } as unknown as ProviderRouter, complete };
+    const router = { complete } as unknown as ProviderRouter;
+    return { router, routers: { draft: router, review: router, deep: false }, complete };
   };
 
   it('sends the conversation history, then reviews the draft', async () => {
-    const { router, complete } = routerReturning('Great question! Rome.', 'Rome.');
+    const { routers, complete } = routerReturning('Great question! Rome.', 'Rome.');
     const history = [user('Hi'), assistant('Hello.')];
 
-    await expect(answer(router, history, 'Capital of Italy?')).resolves.toBe('Rome.');
+    await expect(answer(routers, history, 'Capital of Italy?')).resolves.toBe('Rome.');
 
     const [draftCall, reviewCall] = complete.mock.calls.map(([messages]) => messages);
     expect(draftCall).toEqual([
@@ -116,13 +120,37 @@ describe('answer', () => {
   });
 
   it('returns the draft when the review pass fails', async () => {
-    const { router } = routerReturning('Rome.', new Error('rate limited'));
-    await expect(answer(router, [], 'Capital of Italy?')).resolves.toBe('Rome.');
+    const { routers } = routerReturning('Rome.', new Error('rate limited'));
+    await expect(answer(routers, [], 'Capital of Italy?')).resolves.toBe('Rome.');
   });
 
   it('fails when the draft cannot be generated', async () => {
-    const { router } = routerReturning(new Error('down'));
-    await expect(answer(router, [], 'Capital of Italy?')).rejects.toThrow('down');
+    const { routers } = routerReturning(new Error('down'));
+    await expect(answer(routers, [], 'Capital of Italy?')).rejects.toThrow('down');
+  });
+});
+
+describe('in-depth answers', () => {
+  it('drafts with the in-depth model, reviews with the standard one, and allows longer output', async () => {
+    const draft = vi.fn(async (_messages: ChatMessage[], _options: { maxOutputTokens: number }) => 'Long answer.');
+    const review = vi.fn(async (_messages: ChatMessage[], _options: { maxOutputTokens: number }) => 'OK');
+    const routers = {
+      draft: { complete: draft } as unknown as ProviderRouter,
+      review: { complete: review } as unknown as ProviderRouter,
+      deep: true,
+    };
+
+    await expect(answer(routers, [], 'Explain')).resolves.toBe('Long answer.');
+
+    expect(draft).toHaveBeenCalledTimes(1);
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(draft.mock.calls[0][0][0].content).toBe(`${SYSTEM_PROMPT}\n${DEEP_INSTRUCTION}`);
+    expect(review.mock.calls[0][0][0]).toEqual({ role: 'system', content: REVIEW_SYSTEM_PROMPT });
+    expect(draft.mock.calls[0][1].maxOutputTokens).toBeGreaterThan(700);
+  });
+
+  it('accepts the deep flag in the request', () => {
+    expect(parseChatRequest({ message: 'hi', deep: true })?.deep).toBe(true);
   });
 });
 
@@ -130,7 +158,8 @@ describe('attachments in model messages', () => {
   const IMAGE = 'data:image/jpeg;base64,AAAA';
   const capture = () => {
     const complete = vi.fn(async (_messages: ChatMessage[]) => 'OK');
-    return { router: { complete } as unknown as ProviderRouter, complete };
+    const router = { complete } as unknown as ProviderRouter;
+    return { router, routers: { draft: router, review: router, deep: false }, complete };
   };
 
   it('inlines document text and sends images as separate parts', () => {
@@ -153,7 +182,7 @@ describe('attachments in model messages', () => {
   });
 
   it('re-sends stored document text in the history, and only mentions past images', async () => {
-    const { router, complete } = capture();
+    const { routers, complete } = capture();
     const history: ConversationMessage[] = [
       {
         role: 'user',
@@ -164,7 +193,7 @@ describe('attachments in model messages', () => {
       assistant('Summary.'),
     ];
 
-    await answer(router, history, 'And the date?');
+    await answer(routers, history, 'And the date?');
 
     const [draftCall, reviewCall] = complete.mock.calls.map(([messages]) => messages);
     expect(draftCall[1].content).toBe(
@@ -176,8 +205,8 @@ describe('attachments in model messages', () => {
   });
 
   it('tells the reviewer which files were attached, without their content', async () => {
-    const { router, complete } = capture();
-    await answer(router, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Secret body' }], images: [] });
+    const { routers, complete } = capture();
+    await answer(routers, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Secret body' }], images: [] });
 
     const review = complete.mock.calls[1][0][1].content;
     expect(review).toContain('[The user attached: a.pdf]');
@@ -188,7 +217,8 @@ describe('attachments in model messages', () => {
 describe('createDocument', () => {
   const routerReturning = (reply: string) => {
     const complete = vi.fn(async (_messages: ChatMessage[], _options: unknown) => reply);
-    return { router: { complete } as unknown as ProviderRouter, complete };
+    const router = { complete } as unknown as ProviderRouter;
+    return { router, routers: { draft: router, review: router, deep: false }, complete };
   };
 
   it('asks for JSON and returns the validated document', async () => {

@@ -21,6 +21,8 @@ export interface User {
   status: UserStatus;
   isAdmin: boolean;
   dailyMessageLimit: number;
+  /** Daily allowance of in-depth answers, on top of the general limit. */
+  dailyDeepLimit: number;
 }
 
 export type AppEnv = {

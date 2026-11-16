@@ -41,3 +41,38 @@ export async function refundMessage(db: D1Database, user: User, day: string): Pr
     .bind(user.id, day)
     .run();
 }
+
+export async function getUsedDeepMessages(db: D1Database, user: User, day: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT deep_messages FROM daily_usage WHERE user_id = ? AND day = ?')
+    .bind(user.id, day)
+    .first<{ deep_messages: number }>();
+  return row?.deep_messages ?? 0;
+}
+
+/**
+ * Atomically takes one in-depth answer from today's allowance. Call it after
+ * `consumeMessage`, which creates today's row. Returns the new count, or null
+ * when the allowance is used up.
+ */
+export async function consumeDeepMessage(db: D1Database, user: User, day: string): Promise<number | null> {
+  if (user.dailyDeepLimit <= 0) return null;
+
+  const row = await db
+    .prepare(
+      `UPDATE daily_usage SET deep_messages = deep_messages + 1
+       WHERE user_id = ?1 AND day = ?2 AND deep_messages < ?3
+       RETURNING deep_messages`,
+    )
+    .bind(user.id, day, user.dailyDeepLimit)
+    .first<{ deep_messages: number }>();
+
+  return row?.deep_messages ?? null;
+}
+
+export async function refundDeepMessage(db: D1Database, user: User, day: string): Promise<void> {
+  await db
+    .prepare('UPDATE daily_usage SET deep_messages = deep_messages - 1 WHERE user_id = ? AND day = ? AND deep_messages > 0')
+    .bind(user.id, day)
+    .run();
+}

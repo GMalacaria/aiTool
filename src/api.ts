@@ -10,6 +10,9 @@ export interface Account {
   isAdmin: boolean;
   dailyLimit: number;
   remaining: number;
+  /** Daily allowance of in-depth answers. */
+  deepLimit: number;
+  deepRemaining: number;
 }
 
 export type AnswerFormat = 'text' | 'document';
@@ -31,6 +34,8 @@ export interface ConversationSummary {
 
 export interface ChatResult {
   answer: string;
+  /** Absent on fixed answers, which do not touch the allowances. */
+  deepRemaining?: number;
   /** Present when a document was requested. */
   document?: DocumentSpec;
   remaining: number;
@@ -45,6 +50,7 @@ export interface ManagedUser {
   status: UserStatus;
   isAdmin: boolean;
   dailyLimit: number;
+  deepLimit: number;
   createdAt: string;
 }
 
@@ -104,8 +110,9 @@ export const sendMessage = (
   message: string,
   format: AnswerFormat,
   attachments: Attachments,
-) => request<ChatResult>('/chat', 'POST', { conversationId, message, format, attachments });
+  deep: boolean,
+) => request<ChatResult>('/chat', 'POST', { conversationId, message, format, attachments, deep });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
-export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number }) =>
+export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number }) =>
   request<void>(`/admin/users/${id}`, 'PATCH', changes);
