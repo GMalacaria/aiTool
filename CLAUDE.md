@@ -84,7 +84,12 @@ Rules:
 ## Development
 
 - `npm run dev` — Vite dev server with the Worker running locally (frontend + `/api/*`).
-- `npm run typecheck` / `npm run build` — must pass before opening a PR.
+- `npm test` / `npm run build` (includes typecheck) — must pass before opening a PR.
+- `npm run db:migrate` — apply D1 migrations locally (`db:migrate:remote` for production).
+- `npm run user:add -- "Name" [--limit 15] [--remote]` — create a user; the access code is printed once, only its hash is stored.
+- `npm run mock:llm` — local fake model; set `OPENAI_BASE_URL` in `.dev.vars` to use it.
+- API: `GET /api/me`, `POST /api/chat` (both need `Authorization: Bearer <access code>`). The conversation lives only in the browser's memory; the server stores users and daily counters, never messages.
+- Unverified assumption: the OpenAI request omits `temperature` (set per provider in `worker/llm/providers.ts`).
 - `npm run deploy` — build and deploy to Cloudflare (needs `wrangler login`).
 - Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`).
 - Local secrets go in `.dev.vars` (git-ignored); production secrets via `wrangler secret put`.

@@ -12,7 +12,12 @@ Success metric: **question solved, chat closed**.
 
 ## Status
 
-Early stage — project scaffold only (React frontend + Cloudflare Worker with a health endpoint). No chat yet.
+Early stage — working MVP slice, local only (not deployed):
+
+- sign-in with a personal access code, daily message limit per person;
+- chat through an OpenAI-compatible provider router;
+- every answer goes through a second "anti-sycophancy" review call;
+- fixed answers pointing to real services for sensitive topics.
 
 ## Development
 
@@ -20,12 +25,18 @@ Requires Node.js 22 or later.
 
 ```bash
 npm install
+cp .dev.vars.example .dev.vars   # then put your OpenAI key in it
+npm run db:migrate               # create the local D1 database
+npm run user:add -- "Name"       # prints the access code once
 npm run dev
 ```
 
 - `src/` — React frontend (Vite).
 - `worker/` — Cloudflare Worker (Hono), API under `/api/*`.
-- `npm run build` typechecks and builds; `npm run deploy` deploys to Cloudflare.
+- `migrations/` — D1 schema.
+- `npm test` runs the unit tests; `npm run build` typechecks and builds.
+- `npm run mock:llm` starts a local fake model for working without an API key (see `.dev.vars.example`).
+- `npm run deploy` deploys to Cloudflare.
 
 ## Contributing
 
