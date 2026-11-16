@@ -1,0 +1,159 @@
+# CLAUDE.md — ConoscenzIA (code name: aiTool)
+
+## Repository rules
+
+- **Everything in the repository is in English**: code, identifiers, comments, commit messages, branch names, PR titles/descriptions, documentation. The only exception is user-facing UI copy, which is Italian.
+- **`main` is protected**: never commit or push to it directly. All changes land through a pull request from a development branch.
+- Branch names: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
+- For now only the repository owner creates branches and commits. External contributions are not accepted yet.
+- Never commit secrets (API keys, `.env` files).
+
+## Name
+
+- **Visible name** (UI, icon, PWA title): **ConoscenzIA**.
+- **Code name** (repository, packages, variables, identifiers): **aiTool**.
+- ConoscenzIA is for family and Italian use; an international launch would need a distinctive name that is pronounceable in several languages, to be checked (domain and UIBM/EUIPO trademark) before launch. "Utilis" was discarded: already used in software.
+
+## Project goal
+
+A free web app where anyone (adults, fragile people, in the future possibly minors) can ask questions to a generative AI that:
+
+- **gives the requested information and nothing more**, with no flattery, compliments or "nice words";
+- **does not try to retain the user** in the chat: no questions to prolong the conversation, no invitations to come back;
+- **does not create an emotional bond**: no personality, human name or avatar; it presents itself as a tool;
+- **points out errors and inaccuracies** in the user's statements instead of agreeing;
+- states uncertainty when there is any.
+
+Success metric: **question solved and chat closed**, not time spent or number of messages.
+
+Similar existing reference: Noema (pilot project that observes conversations and corrects the chatbot when it detects dependency or sycophancy).
+
+## Decisions taken
+
+- **Free for the user** through the free tiers of LLM APIs, with a **daily message limit per user**.
+- **Family use: budget of €10–15/month** to get better results than the free tiers (see "Models").
+- Free-tier quotas apply **per developer account (the whole app)**, not per end user: the per-user limit is computed by dividing the total quota.
+- **Multiple providers with automatic fallback**: a single OpenAI Chat Completions–compatible client that moves to the next provider on 429 / quota exhausted.
+- **Future "bring your own key" (BYOK) option** for technical users, next to the shared quota. The user's key stays on their device and is never stored on the server.
+- No unofficial routes (e.g. reusing the user's ChatGPT login): they violate terms of use.
+- No advertising and no data selling: they would create the incentive to retain the user.
+
+## Features
+
+- **First use: family.** Each family member has an account in the app with a daily limit; API keys belong to the developer only and live in the backend.
+- **Mobile app as a PWA** (installable from the browser); possibly a native app with Capacitor.
+- **TODO: image reading** (photo/screenshot → question) with GPT-6 Luna/Sol.
+- **TODO: image generation** with Nano Banana 2 Lite (paid). Needs a content filter, especially for minors.
+- **No voice output (text-to-speech): it creates a relationship.** Product decision.
+
+## Models (family use, November 2026 prices — verify)
+
+| Role | Model | Price | Estimated cost/month |
+|---|---|---|---|
+| Default chat | **GPT-6 Luna** (`gpt-6-luna`) | $0.10 input / $0.50 output per million tokens | ~$2 |
+| "More in-depth answer" chat | **GPT-6 Sol** (`gpt-6-sol`), on user request | $2 / $10 per million tokens | ~$4–5 (if ~20% of messages) |
+| Anti-sycophancy check | Always **GPT-6 Luna**, even when the answer comes from Sol | same as Luna | included above |
+| Image reading | GPT-6 Luna / Sol (accept text and images) | as above | included |
+| Image generation | **Nano Banana 2 Lite** (Gemini 3.1 Flash Lite Image) | ~$0.034 per image | ~$3–5 (100–150 images) |
+| Fallback | Free tiers (Groq, Gemini Flash-Lite, OpenRouter) | 0 | 0 |
+
+Model choice in the UI:
+- Luna is the default; Sol is enabled by a "More in-depth answer" button, **without showing model names**.
+- **Daily per-user limit on Sol answers** (e.g. 3–5), on top of the general message limit.
+- Everything on Sol would cost ~$35–40/month: out of budget, to be avoided.
+
+Estimate assumptions: ~6 users, ~15 messages/day each, ~2,000 tokens per call, anti-sycophancy check enabled (2 calls/message).
+
+Rules:
+- Set a **spending cap** in each provider's console (OpenAI and Google). Expected total ~€10/month.
+- Prefer paid plans that do not use data for training; verify the terms.
+- Avoid providers with data outside the EU without guarantees (e.g. DeepSeek), since users are family members, including teenagers.
+- The multi-provider router also protects against price changes.
+
+## To be confirmed
+
+- MVP for adults only (minors bring much heavier legal and safety obligations).
+- Backend stack: Node on Cloudflare Workers (free tier) or an equivalent alternative.
+- Login: anonymous with a per-device/IP limit, or lightweight login.
+- Anti-sycophancy check on all answers or sampled (it doubles the calls).
+
+## Architecture
+
+```
+[React frontend]  →  [Lightweight backend]  →  [Provider router]  →  Groq / Gemini / OpenRouter / Mistral …
+                         │
+                         ├─ hides API keys (never call LLMs from the client with the shared key)
+                         ├─ enforces the daily per-user limit
+                         ├─ injects the anti-sycophancy system prompt
+                         ├─ truncates history (tokens per day are the bottleneck)
+                         ├─ detects sensitive topics → fixed answer pointing to real services
+                         └─ (optional) second pass: verify/rewrite the answer
+```
+
+### Provider router
+
+- All providers expose OpenAI-compatible endpoints: a single client, ordered list of `{provider, baseURL, model, apiKey}`.
+- On 429 or quota error: move to the next one; keep the "exhausted until reset" state in memory.
+- Read the rate-limit headers (e.g. `x-ratelimit-remaining-*` on Groq) instead of guessing.
+- Daily resets are not aligned (e.g. Gemini at midnight Pacific time).
+
+### Token containment
+
+With free tiers the blocking limit is almost always **tokens per day**, not requests per day. Therefore:
+
+- short system prompt;
+- history limited to the last N turns (or a summary);
+- small output `max_tokens`;
+- low temperature.
+
+## Model behaviour (guidelines for the system prompt)
+
+- Direct answer to the question, no preamble.
+- No compliments ("great question" etc.), no expression of its own emotions.
+- No closing question to continue the conversation, except for indispensable clarifications.
+- If the user states something wrong, correct it explicitly.
+- State uncertainty; do not make things up.
+- Impersonal, tool-like tone ("this tool has no personal opinions…").
+- Do not go along with requests for a relationship/friendship: remind that it is a tool and, if needed, point to real people or services.
+- "Neutral" does not mean "cold": with users in difficulty stay polite and brief, and point to human help.
+
+## Product design against bonding
+
+- No memory across sessions (or explicit, user-controllable memory).
+- No avatar, human name, or "is typing…" indicator.
+- Session limit and periodic reminder "this is a tool, not a person".
+- Honest message when the quota is used up: "Daily limit reached, come back tomorrow."
+- Sensitive-topic detection (mental health, self-harm, violence) with a fixed answer and real numbers/services.
+
+## Free providers (data collected in November 2026 — verify in the consoles)
+
+| Provider | Model | Req/day | Tokens/day | Notes |
+|---|---|---|---|---|
+| Groq | llama-3.1-8b-instant | 14,400 | 500,000 | Per-organization limits; does not train on data |
+| Groq | llama-3.3-70b-versatile | 1,000 | 100,000 | |
+| Groq | openai/gpt-oss-120b | 1,000 | 200,000 | |
+| Groq | openai/gpt-oss-20b | 1,000 | 200,000 | Some sources: 14,400 / 500,000 |
+| Google Gemini | Flash-Lite | ~500 | — | Per-project limits, AI Studio only; in the EU paid-service terms apply (no training) |
+| Google Gemini | Flash | ~20 | — | Negligible quota |
+| OpenRouter | `:free` models | 50 (1,000 after a one-off $10 credit purchase) | — | Training depends on the downstream provider |
+| Mistral | Free mode | from console | from console | Training on by default, opt-out in the Admin panel; EU company |
+| Cloudflare Workers AI | various | 10,000 neurons/day | — | Conversion to requests to be measured |
+| Cerebras | — | — | — | Free tier closed in July 2026: excluded |
+
+Estimate with 2,000 tokens/call, 2 calls/message, 10 messages/user: **~53 users/day**, peak ~26 messages/minute.
+Spreadsheet with editable parameters: https://claude.ai/artifact/1mj4nYV9vSnjFzmAX4hiRx
+
+Free tiers change without notice (e.g. Gemini cut by 50–80% in 2026) and are often meant for prototypes: plan for graceful degradation.
+
+## Privacy and obligations (to be verified with an expert)
+
+- **GDPR**: data minimization; in Italy parental consent under 14; care with sensitive data.
+- **EU AI Act**: transparency obligation (the user must know they are talking to an AI); care with systems aimed at vulnerable people.
+- **Provider terms of use**: many restrict use by minors; also check whether the free tier uses data for training.
+- Do not store conversations on the server unless strictly necessary.
+
+## Working conventions
+
+- Developer: experienced frontend (Angular, now React).
+- UI language: Italian. Repository language: English.
+- Direct, concise answers and explanations; flag any inaccuracies in the assumptions.
