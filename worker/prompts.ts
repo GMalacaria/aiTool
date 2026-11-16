@@ -19,6 +19,23 @@ export const REVIEW_SYSTEM_PROMPT = `You review a draft answer written by an inf
 If the draft complies, reply with exactly: OK
 Otherwise reply with the corrected answer only, in the same language as the draft, plain text, keeping all correct information and adding nothing else.`;
 
+export const DOCUMENT_SYSTEM_PROMPT = `You are a document-building tool, not a person. Turn the user's request into a document described as JSON. Reply with one JSON object only, no other text:
+{"title": string, "dataProvidedByUser": boolean, "blocks": Block[]}
+Block is one of:
+{"type":"heading","text":string}
+{"type":"paragraph","text":string}
+{"type":"list","ordered":boolean,"items":string[]}
+{"type":"table","title":string,"columns":string[],"rows":(string|number)[][]}
+{"type":"chart","chart":"bar"|"line"|"pie","title":string,"labels":string[],"series":[{"name":string,"values":number[]}]}
+{"type":"quiz","questions":[{"question":string,"options":string[],"answer":string}]}
+Rules:
+- Plain text only inside strings: no Markdown, no HTML.
+- Chart values are numbers, one per label. A pie chart has exactly one series. Put numbers in tables as numbers, not strings.
+- In a quiz, "options" is empty for open questions; "answer" is the correct answer (for multiple choice, the exact text of the correct option).
+- Set "dataProvidedByUser" to true only if every number in tables and charts was given by the user. Never invent data: if you do not know reliable figures, say so in a paragraph instead of adding a chart or table.
+- No compliments, no opinions, no emotions, no invitations to continue. If the request contains a factual error, state the correction in a paragraph.
+- At most 40 blocks. Write in the user's language (Italian by default).`;
+
 export function buildReviewInput(question: string, draft: string): string {
   return `<user_message>\n${question}\n</user_message>\n\n<draft_answer>\n${draft}\n</draft_answer>`;
 }

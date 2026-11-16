@@ -19,6 +19,7 @@ Early stage — working MVP:
 - chat through an OpenAI-compatible provider router;
 - every answer goes through a second "anti-sycophancy" review call;
 - conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
+- "Crea documento": the model describes a document (text, lists, tables, bar/line/pie charts, quizzes with answer key) and the app renders it and exports it to PDF and Excel on the device;
 - fixed answers pointing to real services for sensitive topics (never stored);
 - installable as a PWA.
 
@@ -38,6 +39,7 @@ The emails listed in `ADMIN_EMAILS` are approved automatically and can approve o
 
 - `src/` — React frontend (Vite).
 - `worker/` — Cloudflare Worker (Hono), API under `/api/*`.
+- `shared/` — code used by both (document format and validation).
 - `migrations/` — D1 schema.
 - `npm test` runs the unit tests; `npm run build` typechecks and builds.
 - `npm run mock` starts local stand-ins for the model and for Google sign-in, for working without real credentials (see `.dev.vars.example`).

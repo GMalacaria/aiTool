@@ -14,7 +14,8 @@ import {
   SESSION_MAX_AGE_SECONDS,
   upsertUser,
 } from './auth/session';
-import { answer, MAX_HISTORY_MESSAGES, parseChatRequest } from './chat';
+import { parseDocument } from '../shared/document';
+import { answer, createDocument, MAX_HISTORY_MESSAGES, parseChatRequest, type ConversationMessage } from './chat';
 import {
   deleteAllConversations,
   deleteConversation,
@@ -32,6 +33,14 @@ const STATE_COOKIE = 'oauth_state';
 const STATUSES: UserStatus[] = ['pending', 'approved', 'blocked'];
 
 const app = new Hono<AppEnv>().basePath('/api');
+
+/** Document messages are sent to the client parsed, with the title as text. */
+function toClientMessage(message: ConversationMessage) {
+  const document = message.kind === 'document' ? parseDocument(message.content) : null;
+  return document
+    ? { role: message.role, content: document.title, document }
+    : { role: message.role, content: message.content };
+}
 
 app.use(requireSameOrigin);
 
@@ -123,7 +132,8 @@ app.delete('/conversations', requireUser, requireApproved, async (c) => {
 app.get('/conversations/:id', requireUser, requireApproved, async (c) => {
   const conversation = await findConversation(c.env.DB, c.get('user'), c.req.param('id'));
   if (!conversation) return c.json({ error: 'not_found' }, 404);
-  return c.json({ ...conversation, messages: await listMessages(c.env.DB, conversation.id) });
+  const messages = await listMessages(c.env.DB, conversation.id);
+  return c.json({ ...conversation, messages: messages.map(toClientMessage) });
 });
 
 app.delete('/conversations/:id', requireUser, requireApproved, async (c) => {
@@ -159,10 +169,18 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
   try {
     const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
+    const remaining = Math.max(0, user.dailyMessageLimit - used);
+
+    if (request.format === 'document') {
+      const document = await createDocument(getRouter(c.env), history, request.message);
+      const stored = JSON.stringify(document);
+      const conversation = await saveExchange(db, user, request.conversationId, request.message, stored, 'document');
+      return c.json({ answer: document.title, document, remaining, conversation });
+    }
+
     const text = await answer(getRouter(c.env), history, request.message);
     const conversation = await saveExchange(db, user, request.conversationId, request.message, text);
-
-    return c.json({ answer: text, remaining: Math.max(0, user.dailyMessageLimit - used), conversation });
+    return c.json({ answer: text, remaining, conversation });
   } catch (error) {
     console.error('chat failed', error);
     await refundMessage(db, user, day);

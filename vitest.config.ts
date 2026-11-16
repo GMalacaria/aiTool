@@ -4,6 +4,6 @@ import { defineConfig } from 'vitest/config';
 // Node, without the Cloudflare plugin.
 export default defineConfig({
   test: {
-    include: ['worker/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
+    include: ['worker/**/*.test.ts', 'shared/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
   },
 });

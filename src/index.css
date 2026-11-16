@@ -229,6 +229,10 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
+.chat-messages > * {
+  min-width: 0;
+}
+
 .chat-messages {
   display: flex;
   flex-direction: column;
@@ -341,4 +345,123 @@ textarea {
   .panel-toggle {
     display: inline-block;
   }
+}
+
+/* Generated documents */
+
+.chat-form-footer {
+  flex-wrap: wrap;
+}
+
+.chat-form-buttons {
+  display: flex;
+  margin-left: auto;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.doc {
+  display: grid;
+  /* Lets wide tables and charts scroll inside the document instead of stretching it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  min-width: 0;
+}
+
+.doc h3 {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+}
+
+.doc .doc-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.doc p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.doc-list {
+  padding-left: 1.5rem;
+  list-style: revert;
+}
+
+.doc-table {
+  overflow-x: auto;
+}
+
+.doc-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.doc-table caption {
+  padding-bottom: 0.4rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.doc-table th,
+.doc-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-table .doc-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-chart {
+  margin: 0;
+}
+
+.doc-chart figcaption {
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.doc-chart > div {
+  overflow-x: auto;
+}
+
+/* Below this width the labels would be too small: scroll sideways instead. */
+.doc-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 26rem;
+  max-width: 40rem;
+  height: auto;
+}
+
+.doc-quiz {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style: decimal;
+}
+
+.doc-quiz ul {
+  margin-top: 0.25rem;
+}
+
+.doc-quiz details {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
