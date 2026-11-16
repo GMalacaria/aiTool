@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseDocument } from '../../shared/document';
 import { axisScale, chartSvg, niceCeil, pieSlices } from './chart';
 import { buildSheets } from './excel';
+import { fitWithin } from '../attachments/image';
 import { fileName } from './files';
 
 const style = { textColor: '#000', gridColor: '#ccc', fontFamily: 'Roboto' };
@@ -101,5 +102,13 @@ describe('fileName', () => {
   it('builds a safe file name', () => {
     expect(fileName('Città & paesi: età media!', 'pdf')).toBe('citta-paesi-eta-media.pdf');
     expect(fileName('???', 'xlsx')).toBe('documento.xlsx');
+  });
+});
+
+describe('fitWithin', () => {
+  it('scales down keeping the proportions and never scales up', () => {
+    expect(fitWithin(4000, 3000, 1568)).toEqual({ width: 1568, height: 1176 });
+    expect(fitWithin(600, 1200, 1568)).toEqual({ width: 600, height: 1200 });
+    expect(fitWithin(3000, 10, 1000)).toEqual({ width: 1000, height: 3 });
   });
 });

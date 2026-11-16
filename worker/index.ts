@@ -14,6 +14,7 @@ import {
   SESSION_MAX_AGE_SECONDS,
   upsertUser,
 } from './auth/session';
+import { hasAttachments, toStored } from '../shared/attachments';
 import { parseDocument } from '../shared/document';
 import { answer, createDocument, MAX_HISTORY_MESSAGES, parseChatRequest, type ConversationMessage } from './chat';
 import {
@@ -37,9 +38,14 @@ const app = new Hono<AppEnv>().basePath('/api');
 /** Document messages are sent to the client parsed, with the title as text. */
 function toClientMessage(message: ConversationMessage) {
   const document = message.kind === 'document' ? parseDocument(message.content) : null;
+  // The client only needs the names: extracted text stays on the server.
+  const attachments = message.attachments
+    ? { documents: message.attachments.documents.map((entry) => entry.name), images: message.attachments.images }
+    : undefined;
+
   return document
     ? { role: message.role, content: document.title, document }
-    : { role: message.role, content: message.content };
+    : { role: message.role, content: message.content, attachments };
 }
 
 app.use(requireSameOrigin);
@@ -170,16 +176,25 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
   try {
     const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
     const remaining = Math.max(0, user.dailyMessageLimit - used);
+    const { attachments } = request;
+    const stored = hasAttachments(attachments) ? toStored(attachments) : null;
 
     if (request.format === 'document') {
-      const document = await createDocument(getRouter(c.env), history, request.message);
-      const stored = JSON.stringify(document);
-      const conversation = await saveExchange(db, user, request.conversationId, request.message, stored, 'document');
+      const document = await createDocument(getRouter(c.env), history, request.message, attachments);
+      const conversation = await saveExchange(
+        db,
+        user,
+        request.conversationId,
+        request.message,
+        JSON.stringify(document),
+        'document',
+        stored,
+      );
       return c.json({ answer: document.title, document, remaining, conversation });
     }
 
-    const text = await answer(getRouter(c.env), history, request.message);
-    const conversation = await saveExchange(db, user, request.conversationId, request.message, text);
+    const text = await answer(getRouter(c.env), history, request.message, attachments);
+    const conversation = await saveExchange(db, user, request.conversationId, request.message, text, 'text', stored);
     return c.json({ answer: text, remaining, conversation });
   } catch (error) {
     console.error('chat failed', error);

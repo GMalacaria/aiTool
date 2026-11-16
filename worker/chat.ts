@@ -1,5 +1,12 @@
+import {
+  hasAttachments,
+  parseAttachments,
+  type Attachments,
+  type DocumentAttachment,
+  type StoredAttachments,
+} from '../shared/attachments';
 import { parseDocument, type DocumentSpec } from '../shared/document';
-import type { ChatMessage, ProviderRouter } from './llm/router';
+import type { ChatMessage, ContentPart, ProviderRouter } from './llm/router';
 import {
   applyReview,
   buildReviewInput,
@@ -23,6 +30,8 @@ export interface ConversationMessage {
   /** For 'document' messages, the JSON document description. */
   content: string;
   kind: MessageKind;
+  /** Attachments stored with a user message (document text, image names). */
+  attachments: StoredAttachments | null;
 }
 
 export interface ChatRequest {
@@ -31,6 +40,7 @@ export interface ChatRequest {
   message: string;
   /** What the answer should be: plain text, or a structured document. */
   format: MessageKind;
+  attachments: Attachments;
 }
 
 /** Validates the client payload; returns null when it is not usable. */
@@ -39,13 +49,17 @@ export function parseChatRequest(payload: unknown): ChatRequest | null {
     conversationId = null,
     message,
     format = 'text',
-  } = (payload ?? {}) as { conversationId?: unknown; message?: unknown; format?: unknown };
+    attachments: rawAttachments,
+  } = (payload ?? {}) as { conversationId?: unknown; message?: unknown; format?: unknown; attachments?: unknown };
 
   if (typeof message !== 'string' || !message.trim() || message.length > MAX_MESSAGE_CHARS) return null;
   if (conversationId !== null && (typeof conversationId !== 'string' || !UUID.test(conversationId))) return null;
   if (format !== 'text' && format !== 'document') return null;
 
-  return { conversationId, message: message.trim(), format };
+  const attachments = parseAttachments(rawAttachments);
+  if (!attachments) return null;
+
+  return { conversationId, message: message.trim(), format, attachments };
 }
 
 /** Keeps only the most recent turns, starting from a user message: tokens are the scarce resource. */
@@ -55,12 +69,52 @@ export function truncateHistory(history: ConversationMessage[]): ConversationMes
   return firstUser === -1 ? [] : recent.slice(firstUser);
 }
 
-function buildMessages(systemPrompt: string, history: ConversationMessage[], question: string): ChatMessage[] {
+function withDocuments(text: string, documents: DocumentAttachment[]): string {
+  const blocks = documents.map(
+    // The closing tag is removed from the text so a file cannot end its own block early.
+    (document) =>
+      `<attached_document name="${document.name}">\n${document.text.replaceAll('</attached_document>', '')}\n</attached_document>`,
+  );
+  return [...blocks, text].join('\n\n');
+}
+
+/** A past user message: document text is sent again, images are no longer available. */
+function historyContent(message: ConversationMessage): string {
+  if (!message.attachments) return message.content;
+  const images = message.attachments.images.length
+    ? `\n\n[Images attached to this message, no longer available: ${message.attachments.images.join(', ')}]`
+    : '';
+  return withDocuments(message.content, message.attachments.documents) + images;
+}
+
+/** The new question, with document text inline and images as separate parts. */
+export function questionContent(question: string, attachments: Attachments): string | ContentPart[] {
+  const text = withDocuments(question, attachments.documents);
+  if (!attachments.images.length) return text;
+  return [
+    { type: 'text', text },
+    ...attachments.images.map((image): ContentPart => ({ type: 'image_url', image_url: { url: image.dataUrl } })),
+  ];
+}
+
+function buildMessages(
+  systemPrompt: string,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+): ChatMessage[] {
   return [
     { role: 'system', content: systemPrompt },
-    ...truncateHistory(history).map(({ role, content }) => ({ role, content })),
-    { role: 'user', content: question },
+    ...truncateHistory(history).map((message) => ({ role: message.role, content: historyContent(message) })),
+    { role: 'user', content: questionContent(question, attachments) },
   ];
+}
+
+/** What the reviewer sees as the user's message: attachments are only mentioned. */
+function reviewQuestion(question: string, attachments: Attachments): string {
+  if (!hasAttachments(attachments)) return question;
+  const names = [...attachments.documents.map((document) => document.name), ...attachments.images.map((image) => image.name)];
+  return `${question}\n\n[The user attached: ${names.join(', ')}]`;
 }
 
 /**
@@ -68,8 +122,13 @@ function buildMessages(systemPrompt: string, history: ConversationMessage[], que
  * `history` holds earlier messages of the same conversation only: nothing is
  * carried over from other conversations.
  */
-export async function answer(router: ProviderRouter, history: ConversationMessage[], question: string): Promise<string> {
-  const draft = await router.complete(buildMessages(SYSTEM_PROMPT, history, question), {
+export async function answer(
+  router: ProviderRouter,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments = { documents: [], images: [] },
+): Promise<string> {
+  const draft = await router.complete(buildMessages(SYSTEM_PROMPT, history, question, attachments), {
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   });
 
@@ -77,7 +136,7 @@ export async function answer(router: ProviderRouter, history: ConversationMessag
     const review = await router.complete(
       [
         { role: 'system', content: REVIEW_SYSTEM_PROMPT },
-        { role: 'user', content: buildReviewInput(question, draft) },
+        { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments), draft) },
       ],
       { maxOutputTokens: MAX_OUTPUT_TOKENS },
     );
@@ -97,8 +156,9 @@ export async function createDocument(
   router: ProviderRouter,
   history: ConversationMessage[],
   question: string,
+  attachments: Attachments = { documents: [], images: [] },
 ): Promise<DocumentSpec> {
-  const raw = await router.complete(buildMessages(DOCUMENT_SYSTEM_PROMPT, history, question), {
+  const raw = await router.complete(buildMessages(DOCUMENT_SYSTEM_PROMPT, history, question, attachments), {
     maxOutputTokens: MAX_DOCUMENT_OUTPUT_TOKENS,
     json: true,
     timeoutMs: DOCUMENT_TIMEOUT_MS,
