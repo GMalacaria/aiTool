@@ -10,6 +10,7 @@ import type { ChatMessage, ContentPart, ProviderRouter } from './llm/router';
 import {
   applyReview,
   buildReviewInput,
+  DEEP_INSTRUCTION,
   DOCUMENT_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -19,6 +20,7 @@ import {
 export const MAX_HISTORY_MESSAGES = 8;
 export const MAX_MESSAGE_CHARS = 4000;
 const MAX_OUTPUT_TOKENS = 700;
+const MAX_DEEP_OUTPUT_TOKENS = 1800;
 const MAX_DOCUMENT_OUTPUT_TOKENS = 4000;
 const DOCUMENT_TIMEOUT_MS = 90_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,6 +43,8 @@ export interface ChatRequest {
   /** What the answer should be: plain text, or a structured document. */
   format: MessageKind;
   attachments: Attachments;
+  /** The user asked for a more in-depth answer. */
+  deep: boolean;
 }
 
 /** Validates the client payload; returns null when it is not usable. */
@@ -50,16 +54,24 @@ export function parseChatRequest(payload: unknown): ChatRequest | null {
     message,
     format = 'text',
     attachments: rawAttachments,
-  } = (payload ?? {}) as { conversationId?: unknown; message?: unknown; format?: unknown; attachments?: unknown };
+    deep = false,
+  } = (payload ?? {}) as {
+    conversationId?: unknown;
+    message?: unknown;
+    format?: unknown;
+    attachments?: unknown;
+    deep?: unknown;
+  };
 
   if (typeof message !== 'string' || !message.trim() || message.length > MAX_MESSAGE_CHARS) return null;
   if (conversationId !== null && (typeof conversationId !== 'string' || !UUID.test(conversationId))) return null;
   if (format !== 'text' && format !== 'document') return null;
+  if (typeof deep !== 'boolean') return null;
 
   const attachments = parseAttachments(rawAttachments);
   if (!attachments) return null;
 
-  return { conversationId, message: message.trim(), format, attachments };
+  return { conversationId, message: message.trim(), format, attachments, deep };
 }
 
 /** Keeps only the most recent turns, starting from a user message: tokens are the scarce resource. */
@@ -117,28 +129,39 @@ function reviewQuestion(question: string, attachments: Attachments): string {
   return `${question}\n\n[The user attached: ${names.join(', ')}]`;
 }
 
+export interface Routers {
+  /** Writes the answer: the standard model, or the in-depth one. */
+  draft: ProviderRouter;
+  /** Always the standard model, also when the draft comes from the in-depth one. */
+  review: ProviderRouter;
+  deep: boolean;
+}
+
 /**
  * Generates the answer to `question`, then runs the anti-sycophancy review on it.
  * `history` holds earlier messages of the same conversation only: nothing is
  * carried over from other conversations.
  */
 export async function answer(
-  router: ProviderRouter,
+  routers: Routers,
   history: ConversationMessage[],
   question: string,
   attachments: Attachments = { documents: [], images: [] },
 ): Promise<string> {
-  const draft = await router.complete(buildMessages(SYSTEM_PROMPT, history, question, attachments), {
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+  const maxOutputTokens = routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+  const systemPrompt = routers.deep ? `${SYSTEM_PROMPT}\n${DEEP_INSTRUCTION}` : SYSTEM_PROMPT;
+  const draft = await routers.draft.complete(buildMessages(systemPrompt, history, question, attachments), {
+    maxOutputTokens,
+    timeoutMs: routers.deep ? DOCUMENT_TIMEOUT_MS : undefined,
   });
 
   try {
-    const review = await router.complete(
+    const review = await routers.review.complete(
       [
         { role: 'system', content: REVIEW_SYSTEM_PROMPT },
         { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments), draft) },
       ],
-      { maxOutputTokens: MAX_OUTPUT_TOKENS },
+      { maxOutputTokens },
     );
     return applyReview(draft, review);
   } catch (error) {

@@ -35,6 +35,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [remaining, setRemaining] = useState(account.remaining);
+  const [deepRemaining, setDeepRemaining] = useState(account.deepRemaining);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'users'>('chat');
@@ -90,7 +91,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   /** Returns false when the message was not sent, so the form can give it back. */
-  async function send(content: string, format: AnswerFormat, attachments: Attachments): Promise<boolean> {
+  async function send(content: string, format: AnswerFormat, attachments: Attachments, deep: boolean): Promise<boolean> {
     const previous = messages;
     const question: ConversationMessage = {
       role: 'user',
@@ -107,9 +108,10 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     setPending(true);
 
     try {
-      const result = await sendMessage(activeId, content, format, attachments);
+      const result = await sendMessage(activeId, content, format, attachments, deep);
       setMessages([...previous, question, { role: 'assistant', content: result.answer, document: result.document }]);
       setRemaining(result.remaining);
+      if (result.deepRemaining !== undefined) setDeepRemaining(result.deepRemaining);
 
       const saved = result.conversation;
       if (saved) {
@@ -245,6 +247,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             error={error}
             remaining={remaining}
             dailyLimit={account.dailyLimit}
+            deepRemaining={deepRemaining}
             onSend={send}
           />
         )}

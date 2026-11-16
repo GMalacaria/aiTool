@@ -1,15 +1,23 @@
 import type { Env } from '../env';
 import { ProviderRouter, type Provider } from './router';
 
-/** Ordered by preference; free-tier fallbacks get appended here later. */
-export function buildProviders(env: Env): Provider[] {
+/** 'standard' answers every message; 'deep' is the "more in-depth answer" model. */
+export type Tier = 'standard' | 'deep';
+
+const OPENAI_MODELS: Record<Tier, string> = {
+  standard: 'gpt-6-luna',
+  deep: 'gpt-6-sol',
+};
+
+/** Ordered by preference; free-tier fallbacks get appended to 'standard' later. */
+export function buildProviders(env: Env, tier: Tier): Provider[] {
   const providers: Provider[] = [];
 
   if (env.OPENAI_API_KEY) {
     providers.push({
-      name: 'openai',
+      name: `openai-${tier}`,
       baseURL: (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
-      model: 'gpt-6-luna',
+      model: OPENAI_MODELS[tier],
       apiKey: env.OPENAI_API_KEY,
       maxTokensParam: 'max_completion_tokens',
     });
@@ -18,11 +26,19 @@ export function buildProviders(env: Env): Provider[] {
   return providers;
 }
 
-let cached: { key: string; router: ProviderRouter } | undefined;
+let cached: { key: string; routers: Record<Tier, ProviderRouter> } | undefined;
 
-/** One router per isolate, so the rate-limit state survives across requests. */
-export function getRouter(env: Env): ProviderRouter {
+/** One router per tier and isolate, so the rate-limit state survives across requests. */
+export function getRouter(env: Env, tier: Tier = 'standard'): ProviderRouter {
   const key = `${env.OPENAI_BASE_URL ?? ''}|${env.OPENAI_API_KEY ?? ''}`;
-  if (cached?.key !== key) cached = { key, router: new ProviderRouter(buildProviders(env)) };
-  return cached.router;
+  if (cached?.key !== key) {
+    cached = {
+      key,
+      routers: {
+        standard: new ProviderRouter(buildProviders(env, 'standard')),
+        deep: new ProviderRouter(buildProviders(env, 'deep')),
+      },
+    };
+  }
+  return cached.routers[tier];
 }

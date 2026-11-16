@@ -503,3 +503,15 @@ textarea {
   padding: 0.15rem 0.5rem;
   font-size: 0.8rem;
 }
+
+.deep-option {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  width: fit-content;
+}
+
+.deep-option input {
+  width: auto;
+  accent-color: var(--accent);
+}

@@ -10,17 +10,20 @@ interface ChatProps {
   error: string | null;
   remaining: number;
   dailyLimit: number;
+  /** In-depth answers left today. */
+  deepRemaining: number;
   /** Resolves to false when the message was not sent. */
-  onSend: (content: string, format: AnswerFormat, attachments: Attachments) => Promise<boolean>;
+  onSend: (content: string, format: AnswerFormat, attachments: Attachments, deep: boolean) => Promise<boolean>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
 
-export function Chat({ messages, pending, error, remaining, dailyLimit, onSend }: ChatProps) {
+export function Chat({ messages, pending, error, remaining, dailyLimit, deepRemaining, onSend }: ChatProps) {
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<Attachments>(EMPTY_ATTACHMENTS);
   const [notes, setNotes] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
+  const [deepRequested, setDeepRequested] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,6 +32,7 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, onSend }
   }, [messages, pending]);
 
   const limitReached = remaining <= 0;
+  const deep = deepRequested && deepRemaining > 0;
   const cannotSend = pending || reading || limitReached || !draft.trim();
 
   async function send(format: AnswerFormat = 'text') {
@@ -40,7 +44,9 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, onSend }
     setAttachments(EMPTY_ATTACHMENTS);
     setNotes([]);
     // Give the unsent message and its attachments back so they are not lost.
-    if (!(await onSend(content, format, sent))) {
+    // The in-depth option applies to one message: it has to be chosen each time.
+    setDeepRequested(false);
+    if (!(await onSend(content, format, sent, deep))) {
       setDraft(content);
       setAttachments(sent);
     }
@@ -162,6 +168,17 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, onSend }
           onKeyDown={handleKeyDown}
           disabled={limitReached}
         />
+        <label className="deep-option">
+          <input
+            type="checkbox"
+            checked={deep}
+            disabled={limitReached || deepRemaining <= 0}
+            onChange={(event) => setDeepRequested(event.target.checked)}
+          />
+          <span>
+            Risposta più approfondita <span className="muted">(rimaste oggi: {deepRemaining})</span>
+          </span>
+        </label>
         <div className="chat-form-footer">
           <span className="muted">
             Messaggi rimasti oggi: {remaining} di {dailyLimit}

@@ -21,7 +21,10 @@ export function Users({ onBack, onFailure }: UsersProps) {
     void reload();
   }, [reload]);
 
-  async function change(user: ManagedUser, changes: { status?: UserStatus; dailyLimit?: number }) {
+  async function change(
+    user: ManagedUser,
+    changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number },
+  ) {
     try {
       await updateUser(user.id, changes);
       await reload();
@@ -30,10 +33,10 @@ export function Users({ onBack, onFailure }: UsersProps) {
     }
   }
 
-  function changeLimit(user: ManagedUser, value: string) {
-    const dailyLimit = Number(value);
-    if (value.trim() && Number.isInteger(dailyLimit) && dailyLimit >= 0 && dailyLimit !== user.dailyLimit) {
-      void change(user, { dailyLimit });
+  function changeLimit(user: ManagedUser, field: 'dailyLimit' | 'deepLimit', value: string) {
+    const limit = Number(value);
+    if (value.trim() && Number.isInteger(limit) && limit >= 0 && limit !== user[field]) {
+      void change(user, { [field]: limit });
     }
   }
 
@@ -70,7 +73,18 @@ export function Users({ onBack, onFailure }: UsersProps) {
                   max={500}
                   defaultValue={user.dailyLimit}
                   key={user.dailyLimit}
-                  onBlur={(event) => changeLimit(user, event.target.value)}
+                  onBlur={(event) => changeLimit(user, 'dailyLimit', event.target.value)}
+                />
+              </label>
+              <label>
+                <span className="muted">Approfondite al giorno</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={user.deepLimit}
+                  key={user.deepLimit}
+                  onBlur={(event) => changeLimit(user, 'deepLimit', event.target.value)}
                 />
               </label>
               {!user.isAdmin && user.status !== 'approved' && (

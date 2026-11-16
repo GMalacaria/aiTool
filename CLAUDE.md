@@ -61,6 +61,7 @@ Similar existing reference: Noema (pilot project that observes conversations and
 Model choice in the UI:
 - Luna is the default; Sol is enabled by a "More in-depth answer" button, **without showing model names**.
 - **Daily per-user limit on Sol answers** (e.g. 3–5), on top of the general message limit.
+- Implemented 2026-11-16: a per-message "Risposta più approfondita" checkbox; default allowance 3 per day (`users.daily_deep_limit`, editable by administrators). An in-depth answer also counts as one normal message. It uses `gpt-6-sol` with a longer output cap (1,800 tokens) and an extra system-prompt instruction; the review pass stays on Luna. If the allowance is used up, or Sol fails, the answer falls back to the standard model and the allowance is not consumed.
 - Everything on Sol would cost ~$35–40/month: out of budget, to be avoided.
 
 Estimate assumptions: ~6 users, ~15 messages/day each, ~2,000 tokens per call, anti-sycophancy check enabled (2 calls/message).
