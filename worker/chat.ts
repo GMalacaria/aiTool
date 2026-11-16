@@ -1,45 +1,51 @@
 import type { ChatMessage, ProviderRouter } from './llm/router';
 import { applyReview, buildReviewInput, REVIEW_SYSTEM_PROMPT, SYSTEM_PROMPT } from './prompts';
 
+/** Previous messages of the conversation sent to the model along with the new question. */
 export const MAX_HISTORY_MESSAGES = 8;
 export const MAX_MESSAGE_CHARS = 4000;
-export const MAX_CONVERSATION_MESSAGES = 60;
 const MAX_OUTPUT_TOKENS = 700;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
-/** Validates the client payload; returns null when it is not a usable conversation. */
-export function parseConversation(payload: unknown): ConversationMessage[] | null {
-  const messages = (payload as { messages?: unknown } | null)?.messages;
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_CONVERSATION_MESSAGES) return null;
-
-  const conversation: ConversationMessage[] = [];
-  for (const message of messages) {
-    const { role, content } = (message ?? {}) as { role?: unknown; content?: unknown };
-    if (role !== 'user' && role !== 'assistant') return null;
-    if (typeof content !== 'string' || !content.trim() || content.length > MAX_MESSAGE_CHARS) return null;
-    conversation.push({ role, content: content.trim() });
-  }
-
-  return conversation.at(-1)?.role === 'user' ? conversation : null;
+export interface ChatRequest {
+  /** Null starts a new conversation. */
+  conversationId: string | null;
+  message: string;
 }
 
-/** Keeps only the most recent turns: tokens are the scarce resource. */
-export function truncateHistory(conversation: ConversationMessage[]): ConversationMessage[] {
-  const recent = conversation.slice(-MAX_HISTORY_MESSAGES);
+/** Validates the client payload; returns null when it is not usable. */
+export function parseChatRequest(payload: unknown): ChatRequest | null {
+  const { conversationId = null, message } = (payload ?? {}) as { conversationId?: unknown; message?: unknown };
+
+  if (typeof message !== 'string' || !message.trim() || message.length > MAX_MESSAGE_CHARS) return null;
+  if (conversationId !== null && (typeof conversationId !== 'string' || !UUID.test(conversationId))) return null;
+
+  return { conversationId, message: message.trim() };
+}
+
+/** Keeps only the most recent turns, starting from a user message: tokens are the scarce resource. */
+export function truncateHistory(history: ConversationMessage[]): ConversationMessage[] {
+  const recent = history.slice(-MAX_HISTORY_MESSAGES);
   const firstUser = recent.findIndex((message) => message.role === 'user');
-  return recent.slice(firstUser);
+  return firstUser === -1 ? [] : recent.slice(firstUser);
 }
 
-/** Generates the answer, then runs the anti-sycophancy review on it. */
-export async function answer(router: ProviderRouter, conversation: ConversationMessage[]): Promise<string> {
-  const history = truncateHistory(conversation);
-  const question = history[history.length - 1].content;
-
-  const draftMessages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history];
+/**
+ * Generates the answer to `question`, then runs the anti-sycophancy review on it.
+ * `history` holds earlier messages of the same conversation only: nothing is
+ * carried over from other conversations.
+ */
+export async function answer(router: ProviderRouter, history: ConversationMessage[], question: string): Promise<string> {
+  const draftMessages: ChatMessage[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...truncateHistory(history),
+    { role: 'user', content: question },
+  ];
   const draft = await router.complete(draftMessages, { maxOutputTokens: MAX_OUTPUT_TOKENS });
 
   try {

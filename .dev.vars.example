@@ -1,6 +1,15 @@
-# Copy to .dev.vars (git-ignored) and fill in. Never commit real keys.
+# Copy to .dev.vars (git-ignored) and fill in. Never commit real values.
 OPENAI_API_KEY=replace-with-your-openai-key
 
-# Optional: point the OpenAI provider at another OpenAI-compatible endpoint,
-# e.g. the local mock started with `npm run mock:llm`.
+# Google sign-in: OAuth client of type "Web application" from Google Cloud Console.
+GOOGLE_CLIENT_ID=replace-with-your-client-id
+GOOGLE_CLIENT_SECRET=replace-with-your-client-secret
+
+# Comma-separated emails approved automatically and allowed to manage users.
+ADMIN_EMAILS=you@example.com
+
+# Optional: use the local mocks started with `npm run mock` instead of the
+# real services (no keys needed; any value works for the settings above).
 # OPENAI_BASE_URL=http://127.0.0.1:8788/v1
+# GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
+# GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token

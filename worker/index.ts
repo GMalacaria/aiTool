@@ -1,53 +1,211 @@
 import { Hono } from 'hono';
-import { requireUser } from './auth';
-import { answer, parseConversation } from './chat';
-import type { AppEnv } from './env';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { buildAuthUrl, exchangeCode } from './auth/google';
+import {
+  createSession,
+  deleteSession,
+  isAdminEmail,
+  randomToken,
+  requireAdmin,
+  requireApproved,
+  requireSameOrigin,
+  requireUser,
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_SECONDS,
+  upsertUser,
+} from './auth/session';
+import { answer, MAX_HISTORY_MESSAGES, parseChatRequest } from './chat';
+import {
+  deleteAllConversations,
+  deleteConversation,
+  findConversation,
+  listConversations,
+  listMessages,
+  saveExchange,
+} from './conversations';
+import type { AppEnv, UserStatus } from './env';
 import { getRouter } from './llm/providers';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
 import { consumeMessage, currentDay, getUsedMessages, refundMessage } from './usage';
 
+const STATE_COOKIE = 'oauth_state';
+const STATUSES: UserStatus[] = ['pending', 'approved', 'blocked'];
+
 const app = new Hono<AppEnv>().basePath('/api');
+
+app.use(requireSameOrigin);
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
 
+// --- Sign-in -----------------------------------------------------------------
+
+app.get('/auth/google/start', (c) => {
+  const url = new URL(c.req.url);
+  const state = randomToken(16);
+
+  setCookie(c, STATE_COOKIE, state, {
+    path: '/api/auth',
+    httpOnly: true,
+    secure: url.protocol === 'https:',
+    sameSite: 'Lax',
+    maxAge: 600,
+  });
+  return c.redirect(buildAuthUrl(c.env, `${url.origin}/api/auth/google/callback`, state));
+});
+
+app.get('/auth/google/callback', async (c) => {
+  const url = new URL(c.req.url);
+  const expectedState = getCookie(c, STATE_COOKIE);
+  deleteCookie(c, STATE_COOKIE, { path: '/api/auth' });
+
+  const code = c.req.query('code');
+  if (!code || !expectedState || c.req.query('state') !== expectedState) return c.redirect('/?error=sign_in_failed');
+
+  try {
+    const profile = await exchangeCode(c.env, code, `${url.origin}/api/auth/google/callback`);
+    const user = await upsertUser(c.env, profile);
+    const token = await createSession(c.env.DB, user.id);
+
+    setCookie(c, SESSION_COOKIE, token, {
+      path: '/',
+      httpOnly: true,
+      secure: url.protocol === 'https:',
+      sameSite: 'Lax',
+      maxAge: SESSION_MAX_AGE_SECONDS,
+    });
+    return c.redirect('/');
+  } catch (error) {
+    console.error('sign-in failed', error);
+    return c.redirect('/?error=sign_in_failed');
+  }
+});
+
+app.post('/auth/logout', async (c) => {
+  const token = getCookie(c, SESSION_COOKIE);
+  if (token) await deleteSession(c.env.DB, token);
+  deleteCookie(c, SESSION_COOKIE, { path: '/' });
+  return c.json({ ok: true });
+});
+
+// --- Account -----------------------------------------------------------------
+
 app.get('/me', requireUser, async (c) => {
   const user = c.get('user');
-  const used = await getUsedMessages(c.env.DB, user, currentDay());
+  const used = user.status === 'approved' ? await getUsedMessages(c.env.DB, user, currentDay()) : 0;
   return c.json({
     name: user.name,
+    email: user.email,
+    status: user.status,
+    isAdmin: user.isAdmin,
     dailyLimit: user.dailyMessageLimit,
     remaining: Math.max(0, user.dailyMessageLimit - used),
   });
 });
 
-app.post('/chat', requireUser, async (c) => {
+/** Deletes the account with everything attached to it (sessions, usage, conversations). */
+app.delete('/me', requireUser, async (c) => {
+  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(c.get('user').id).run();
+  deleteCookie(c, SESSION_COOKIE, { path: '/' });
+  return c.json({ ok: true });
+});
+
+// --- Conversations -----------------------------------------------------------
+
+app.get('/conversations', requireUser, requireApproved, async (c) => {
+  return c.json({ conversations: await listConversations(c.env.DB, c.get('user')) });
+});
+
+app.delete('/conversations', requireUser, requireApproved, async (c) => {
+  await deleteAllConversations(c.env.DB, c.get('user'));
+  return c.json({ ok: true });
+});
+
+app.get('/conversations/:id', requireUser, requireApproved, async (c) => {
+  const conversation = await findConversation(c.env.DB, c.get('user'), c.req.param('id'));
+  if (!conversation) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ...conversation, messages: await listMessages(c.env.DB, conversation.id) });
+});
+
+app.delete('/conversations/:id', requireUser, requireApproved, async (c) => {
+  await deleteConversation(c.env.DB, c.get('user'), c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+app.post('/chat', requireUser, requireApproved, async (c) => {
   const user = c.get('user');
-  const conversation = parseConversation(await c.req.json().catch(() => null));
-  if (!conversation) return c.json({ error: 'invalid_request' }, 400);
+  const request = parseChatRequest(await c.req.json().catch(() => null));
+  if (!request) return c.json({ error: 'invalid_request' }, 400);
 
+  const db = c.env.DB;
   const day = currentDay();
-  const question = conversation[conversation.length - 1].content;
 
-  const topic = detectSensitiveTopic(question);
+  if (request.conversationId && !(await findConversation(db, user, request.conversationId))) {
+    return c.json({ error: 'not_found' }, 404);
+  }
+
+  // Sensitive exchanges get a fixed answer, cost nothing and are never stored.
+  const topic = detectSensitiveTopic(request.message);
   if (topic) {
-    const used = await getUsedMessages(c.env.DB, user, day);
+    const used = await getUsedMessages(db, user, day);
     return c.json({
       answer: sensitiveTopicResponse(topic),
       remaining: Math.max(0, user.dailyMessageLimit - used),
+      conversation: null,
     });
   }
 
-  const used = await consumeMessage(c.env.DB, user, day);
+  const used = await consumeMessage(db, user, day);
   if (used === null) return c.json({ error: 'daily_limit_reached' }, 429);
 
   try {
-    const text = await answer(getRouter(c.env), conversation);
-    return c.json({ answer: text, remaining: Math.max(0, user.dailyMessageLimit - used) });
+    const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
+    const text = await answer(getRouter(c.env), history, request.message);
+    const conversation = await saveExchange(db, user, request.conversationId, request.message, text);
+
+    return c.json({ answer: text, remaining: Math.max(0, user.dailyMessageLimit - used), conversation });
   } catch (error) {
     console.error('chat failed', error);
-    await refundMessage(c.env.DB, user, day);
+    await refundMessage(db, user, day);
     return c.json({ error: 'service_unavailable' }, 503);
   }
+});
+
+// --- Administration ----------------------------------------------------------
+
+app.get('/admin/users', requireUser, requireAdmin, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, created_at AS createdAt
+     FROM users ORDER BY status = 'pending' DESC, created_at DESC`,
+  ).all<{ email: string }>();
+  return c.json({ users: results.map((row) => ({ ...row, isAdmin: isAdminEmail(c.env, row.email) })) });
+});
+
+app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
+  const id = Number(c.req.param('id'));
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as { status?: unknown; dailyLimit?: unknown };
+
+  const target = Number.isInteger(id)
+    ? await c.env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(id).first<{ email: string }>()
+    : null;
+  if (!target) return c.json({ error: 'not_found' }, 404);
+
+  // Administrators are always approved: their status cannot be changed.
+  const status = isAdminEmail(c.env, target.email) ? undefined : STATUSES.find((candidate) => candidate === body.status);
+  const dailyLimit = body.dailyLimit;
+  const validLimit = typeof dailyLimit === 'number' && Number.isInteger(dailyLimit) && dailyLimit >= 0 && dailyLimit <= 500;
+
+  if (!status && !validLimit) return c.json({ error: 'invalid_request' }, 400);
+
+  await c.env.DB.prepare(
+    'UPDATE users SET status = COALESCE(?1, status), daily_message_limit = COALESCE(?2, daily_message_limit) WHERE id = ?3',
+  )
+    .bind(status ?? null, validLimit ? dailyLimit : null, id)
+    .run();
+
+  // A user who is no longer approved loses the open sessions too.
+  if (status && status !== 'approved') await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id).run();
+
+  return c.json({ ok: true });
 });
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
