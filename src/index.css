@@ -465,3 +465,41 @@ textarea {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
+/* Attachments */
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.attachments li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.attachments-pending {
+  margin-top: 0;
+}
+
+.attachments-pending img {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
+}
+
+.attachments-pending button {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}

@@ -1,3 +1,4 @@
+import { parseStoredAttachments, type StoredAttachments } from '../shared/attachments';
 import type { ConversationMessage, MessageKind } from './chat';
 import type { User } from './env';
 
@@ -37,17 +38,17 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content, kind FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT role, content, kind, attachments FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content, kind FROM (
-               SELECT id, role, content, kind FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT role, content, kind, attachments FROM (
+               SELECT id, role, content, kind, attachments FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
 
-  const { results } = await statement.all<ConversationMessage>();
-  return results;
+  const { results } = await statement.all<Omit<ConversationMessage, 'attachments'> & { attachments: string | null }>();
+  return results.map((row) => ({ ...row, attachments: parseStoredAttachments(row.attachments) }));
 }
 
 /** Stores one question/answer exchange, creating the conversation when `conversationId` is null. */
@@ -58,16 +59,19 @@ export async function saveExchange(
   question: string,
   answer: string,
   answerKind: MessageKind = 'text',
+  attachments: StoredAttachments | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
-  const insertMessage = db.prepare('INSERT INTO messages (conversation_id, role, content, kind) VALUES (?, ?, ?, ?)');
+  const insertMessage = db.prepare(
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments) VALUES (?, ?, ?, ?, ?)',
+  );
 
   await db.batch([
     conversationId
       ? db.prepare('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').bind(id, user.id)
       : db.prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)').bind(id, user.id, titleFrom(question)),
-    insertMessage.bind(id, 'user', question, 'text'),
-    insertMessage.bind(id, 'assistant', answer, answerKind),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null),
+    insertMessage.bind(id, 'assistant', answer, answerKind, null),
   ]);
 
   const conversation = await findConversation(db, user, id);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { hasAttachments, type Attachments } from '../shared/attachments';
 import {
   ApiError,
   deleteAccount,
@@ -89,15 +90,25 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   /** Returns false when the message was not sent, so the form can give it back. */
-  async function send(content: string, format: AnswerFormat): Promise<boolean> {
+  async function send(content: string, format: AnswerFormat, attachments: Attachments): Promise<boolean> {
     const previous = messages;
-    setMessages([...previous, { role: 'user', content }]);
+    const question: ConversationMessage = {
+      role: 'user',
+      content,
+      attachments: hasAttachments(attachments)
+        ? {
+            documents: attachments.documents.map((document) => document.name),
+            images: attachments.images.map((image) => image.name),
+          }
+        : undefined,
+    };
+    setMessages([...previous, question]);
     setError(null);
     setPending(true);
 
     try {
-      const result = await sendMessage(activeId, content, format);
-      setMessages([...previous, { role: 'user', content }, { role: 'assistant', content: result.answer, document: result.document }]);
+      const result = await sendMessage(activeId, content, format, attachments);
+      setMessages([...previous, question, { role: 'assistant', content: result.answer, document: result.document }]);
       setRemaining(result.remaining);
 
       const saved = result.conversation;

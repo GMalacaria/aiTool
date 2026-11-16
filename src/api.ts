@@ -1,3 +1,4 @@
+import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
@@ -18,6 +19,8 @@ export interface ConversationMessage {
   /** For document answers, the document title. */
   content: string;
   document?: DocumentSpec;
+  /** Names of the files attached to a question. */
+  attachments?: AttachmentNames;
 }
 
 export interface ConversationSummary {
@@ -96,8 +99,12 @@ export const fetchConversation = (id: string) =>
 export const deleteConversation = (id: string) => request<void>(`/conversations/${id}`, 'DELETE');
 export const deleteAllConversations = () => request<void>('/conversations', 'DELETE');
 
-export const sendMessage = (conversationId: string | null, message: string, format: AnswerFormat) =>
-  request<ChatResult>('/chat', 'POST', { conversationId, message, format });
+export const sendMessage = (
+  conversationId: string | null,
+  message: string,
+  format: AnswerFormat,
+  attachments: Attachments,
+) => request<ChatResult>('/chat', 'POST', { conversationId, message, format, attachments });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
 export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number }) =>
