@@ -1,4 +1,4 @@
-import type { ConversationMessage } from './chat';
+import type { ConversationMessage, MessageKind } from './chat';
 import type { User } from './env';
 
 const TITLE_MAX_CHARS = 60;
@@ -37,11 +37,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT role, content, kind FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content FROM (
-               SELECT id, role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT role, content, kind FROM (
+               SELECT id, role, content, kind FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -57,16 +57,17 @@ export async function saveExchange(
   conversationId: string | null,
   question: string,
   answer: string,
+  answerKind: MessageKind = 'text',
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
-  const insertMessage = db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)');
+  const insertMessage = db.prepare('INSERT INTO messages (conversation_id, role, content, kind) VALUES (?, ?, ?, ?)');
 
   await db.batch([
     conversationId
       ? db.prepare('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').bind(id, user.id)
       : db.prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)').bind(id, user.id, titleFrom(question)),
-    insertMessage.bind(id, 'user', question),
-    insertMessage.bind(id, 'assistant', answer),
+    insertMessage.bind(id, 'user', question, 'text'),
+    insertMessage.bind(id, 'assistant', answer, answerKind),
   ]);
 
   const conversation = await findConversation(db, user, id);

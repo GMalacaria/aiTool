@@ -42,6 +42,7 @@ Similar existing reference: Noema (pilot project that observes conversations and
 
 - **First use: family and close colleagues.** Each person signs in with Google and has a daily limit; API keys belong to the developer only and live in the backend.
 - **Mobile app as a PWA** (installable from the browser); possibly a native app with Capacitor.
+- **Document creation** (added 2026-11-16): the "Crea documento" button asks the model for a JSON document description (`shared/document.ts`: headings, paragraphs, lists, tables, bar/line/pie charts, quizzes). The Worker validates it against size limits; the frontend renders the preview and builds the PDF (pdfmake) and Excel (write-excel-file) files on the device, loading those libraries on demand. The model never produces files or code. No review pass in document mode. When numbers were not supplied by the user, the document carries a fixed disclaimer. TODO: diagrams (flowcharts, maps).
 - **TODO: image reading** (photo/screenshot → question) with GPT-6 Luna/Sol.
 - **TODO: image generation** with Nano Banana 2 Lite (paid). Needs a content filter, especially for minors.
 - **No voice output (text-to-speech): it creates a relationship.** Product decision.
@@ -92,10 +93,10 @@ Rules:
 - Secrets (in `.dev.vars` locally, `wrangler secret put` in production): `OPENAI_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_EMAILS`.
 - Google OAuth redirect URI: `<origin>/api/auth/google/callback`.
 - Auth: server-side OAuth code flow, then an HttpOnly `session` cookie (30 days; only the token hash is stored). State-changing requests must carry a same-origin `Origin` header.
-- API: `/api/auth/google/start|callback`, `/api/auth/logout`, `/api/me` (GET, DELETE), `/api/conversations` (GET, DELETE), `/api/conversations/:id` (GET, DELETE), `/api/chat` (POST `{conversationId, message}`), `/api/admin/users` (GET), `/api/admin/users/:id` (PATCH).
+- API: `/api/auth/google/start|callback`, `/api/auth/logout`, `/api/me` (GET, DELETE), `/api/conversations` (GET, DELETE), `/api/conversations/:id` (GET, DELETE), `/api/chat` (POST `{conversationId, message, format: 'text' | 'document'}`), `/api/admin/users` (GET), `/api/admin/users/:id` (PATCH).
 - Unverified assumption: the OpenAI request omits `temperature` (set per provider in `worker/llm/providers.ts`).
 - `npm run deploy` — build and deploy to Cloudflare (needs `wrangler login`).
-- Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`).
+- Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`), `shared/` code used by both.
 - Local secrets go in `.dev.vars` (git-ignored); production secrets via `wrangler secret put`.
 - The project `.npmrc` pins the public npm registry: never let the lockfile reference another registry.
 

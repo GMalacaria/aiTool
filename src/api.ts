@@ -1,3 +1,5 @@
+import type { DocumentSpec } from '../shared/document';
+
 export type UserStatus = 'pending' | 'approved' | 'blocked';
 
 export interface Account {
@@ -9,9 +11,13 @@ export interface Account {
   remaining: number;
 }
 
+export type AnswerFormat = 'text' | 'document';
+
 export interface ConversationMessage {
   role: 'user' | 'assistant';
+  /** For document answers, the document title. */
   content: string;
+  document?: DocumentSpec;
 }
 
 export interface ConversationSummary {
@@ -22,6 +28,8 @@ export interface ConversationSummary {
 
 export interface ChatResult {
   answer: string;
+  /** Present when a document was requested. */
+  document?: DocumentSpec;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;
@@ -88,8 +96,8 @@ export const fetchConversation = (id: string) =>
 export const deleteConversation = (id: string) => request<void>(`/conversations/${id}`, 'DELETE');
 export const deleteAllConversations = () => request<void>('/conversations', 'DELETE');
 
-export const sendMessage = (conversationId: string | null, message: string) =>
-  request<ChatResult>('/chat', 'POST', { conversationId, message });
+export const sendMessage = (conversationId: string | null, message: string, format: AnswerFormat) =>
+  request<ChatResult>('/chat', 'POST', { conversationId, message, format });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
 export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number }) =>

@@ -16,6 +16,9 @@ export interface Provider {
 
 export interface CompletionOptions {
   maxOutputTokens: number;
+  /** Ask for a single JSON object (`response_format: json_object`). */
+  json?: boolean;
+  timeoutMs?: number;
 }
 
 export class AllProvidersFailedError extends Error {
@@ -68,6 +71,7 @@ export class ProviderRouter {
       [provider.maxTokensParam]: options.maxOutputTokens,
     };
     if (provider.temperature !== undefined) body.temperature = provider.temperature;
+    if (options.json) body.response_format = { type: 'json_object' };
 
     const response = await this.fetchFn(`${provider.baseURL}/chat/completions`, {
       method: 'POST',
@@ -76,7 +80,7 @@ export class ProviderRouter {
         Authorization: `Bearer ${provider.apiKey}`,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
 
     if (response.status === 429) {

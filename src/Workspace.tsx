@@ -8,6 +8,7 @@ import {
   fetchConversations,
   sendMessage,
   type Account,
+  type AnswerFormat,
   type ConversationMessage,
   type ConversationSummary,
 } from './api';
@@ -88,15 +89,15 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   /** Returns false when the message was not sent, so the form can give it back. */
-  async function send(content: string): Promise<boolean> {
+  async function send(content: string, format: AnswerFormat): Promise<boolean> {
     const previous = messages;
     setMessages([...previous, { role: 'user', content }]);
     setError(null);
     setPending(true);
 
     try {
-      const result = await sendMessage(activeId, content);
-      setMessages([...previous, { role: 'user', content }, { role: 'assistant', content: result.answer }]);
+      const result = await sendMessage(activeId, content, format);
+      setMessages([...previous, { role: 'user', content }, { role: 'assistant', content: result.answer, document: result.document }]);
       setRemaining(result.remaining);
 
       const saved = result.conversation;
