@@ -71,6 +71,22 @@ describe('ProviderRouter', () => {
     await expect(router.complete(messages, options)).resolves.toBe('from c');
   });
 
+  it('adds the provider-specific fast parameters only to fast completions', async () => {
+    const fetchFn = vi.fn(async () => completion('ok'));
+    const router = new ProviderRouter(
+      [provider('a', { fastParams: { reasoning_effort: 'none' } })],
+      fetchFn as unknown as typeof fetch,
+    );
+    const bodyOf = (call: number) =>
+      JSON.parse((fetchFn.mock.calls[call] as unknown as [string, RequestInit])[1].body as string);
+
+    await router.complete(messages, { ...options, fast: true });
+    await router.complete(messages, options);
+
+    expect(bodyOf(0).reasoning_effort).toBe('none');
+    expect(bodyOf(1)).not.toHaveProperty('reasoning_effort');
+  });
+
   it('throws when every provider fails', async () => {
     const fetchFn = vi.fn(async () => new Response('boom', { status: 500 }));
     const router = new ProviderRouter([provider('a'), provider('b')], fetchFn as unknown as typeof fetch);

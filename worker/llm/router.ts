@@ -17,12 +17,16 @@ export interface Provider {
   maxTokensParam: 'max_tokens' | 'max_completion_tokens';
   /** Left out of the request when undefined (some models only accept their default). */
   temperature?: number;
+  /** Extra request fields for `fast` completions, e.g. to switch reasoning off. */
+  fastParams?: Record<string, unknown>;
 }
 
 export interface CompletionOptions {
   maxOutputTokens: number;
   /** Ask for a single JSON object (`response_format: json_object`). */
   json?: boolean;
+  /** A trivial task (e.g. classification): answer as quickly as the provider allows. */
+  fast?: boolean;
   timeoutMs?: number;
 }
 
@@ -77,6 +81,7 @@ export class ProviderRouter {
     };
     if (provider.temperature !== undefined) body.temperature = provider.temperature;
     if (options.json) body.response_format = { type: 'json_object' };
+    if (options.fast) Object.assign(body, provider.fastParams);
 
     const response = await this.fetchFn(`${provider.baseURL}/chat/completions`, {
       method: 'POST',

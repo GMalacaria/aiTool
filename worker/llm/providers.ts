@@ -20,6 +20,7 @@ export function buildProviders(env: Env, tier: Tier): Provider[] {
       model: OPENAI_MODELS[tier],
       apiKey: env.OPENAI_API_KEY,
       maxTokensParam: 'max_completion_tokens',
+      fastParams: { reasoning_effort: 'none' },
     });
   }
 
