@@ -40,7 +40,7 @@ Similar existing reference: Noema (pilot project that observes conversations and
 
 ## Features
 
-- **First use: family.** Each family member has an account in the app with a daily limit; API keys belong to the developer only and live in the backend.
+- **First use: family and close colleagues.** Each person signs in with Google and has a daily limit; API keys belong to the developer only and live in the backend.
 - **Mobile app as a PWA** (installable from the browser); possibly a native app with Capacitor.
 - **TODO: image reading** (photo/screenshot → question) with GPT-6 Luna/Sol.
 - **TODO: image generation** with Nano Banana 2 Lite (paid). Needs a content filter, especially for minors.
@@ -73,7 +73,9 @@ Rules:
 ## MVP decisions (confirmed 2026-11-16)
 
 - **Backend stack**: Cloudflare Workers (free tier), TypeScript, Hono. The React frontend is served by the same Worker as static assets.
-- **Login**: personal access code. The developer creates one code per family member; no email or password. The daily limit is per person.
+- **Login** (changed 2026-11-16, replaces personal access codes): Google sign-in only. Anyone can sign in, but a new account stays **pending until an administrator approves it**. Administrators are the emails in `ADMIN_EMAILS`; they manage users from the "Utenti" view. The daily limit is per person.
+- **Audience** (changed 2026-11-16): family plus adults the family works with. The tool must be safe, not limited.
+- **Message history** (changed 2026-11-16): conversations are stored on the server (D1, EU jurisdiction), tied to the account. The user can reopen them, delete one, delete all, or delete the whole account. The model never sees other conversations: no memory across chats. Fixed answers on sensitive topics are never stored.
 - **First provider**: OpenAI GPT-6 Luna from the start; free tiers are added later as fallback through the router.
 - **Anti-sycophancy check**: on every answer (second call that verifies and, if needed, rewrites).
 
@@ -86,9 +88,11 @@ Rules:
 - `npm run dev` — Vite dev server with the Worker running locally (frontend + `/api/*`).
 - `npm test` / `npm run build` (includes typecheck) — must pass before opening a PR.
 - `npm run db:migrate` — apply D1 migrations locally (`db:migrate:remote` for production).
-- `npm run user:add -- "Name" [--limit 15] [--remote]` — create a user; the access code is printed once, only its hash is stored.
-- `npm run mock:llm` — local fake model; set `OPENAI_BASE_URL` in `.dev.vars` to use it.
-- API: `GET /api/me`, `POST /api/chat` (both need `Authorization: Bearer <access code>`). The conversation lives only in the browser's memory; the server stores users and daily counters, never messages.
+- `npm run mock` — local stand-ins for the model and for Google sign-in; enable them in `.dev.vars` (see `.dev.vars.example`).
+- Secrets (in `.dev.vars` locally, `wrangler secret put` in production): `OPENAI_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_EMAILS`.
+- Google OAuth redirect URI: `<origin>/api/auth/google/callback`.
+- Auth: server-side OAuth code flow, then an HttpOnly `session` cookie (30 days; only the token hash is stored). State-changing requests must carry a same-origin `Origin` header.
+- API: `/api/auth/google/start|callback`, `/api/auth/logout`, `/api/me` (GET, DELETE), `/api/conversations` (GET, DELETE), `/api/conversations/:id` (GET, DELETE), `/api/chat` (POST `{conversationId, message}`), `/api/admin/users` (GET), `/api/admin/users/:id` (PATCH).
 - Unverified assumption: the OpenAI request omits `temperature` (set per provider in `worker/llm/providers.ts`).
 - `npm run deploy` — build and deploy to Cloudflare (needs `wrangler login`).
 - Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`).
@@ -137,7 +141,7 @@ With free tiers the blocking limit is almost always **tokens per day**, not requ
 
 ## Product design against bonding
 
-- No memory across sessions (or explicit, user-controllable memory).
+- The model has no memory across conversations. The stored history is explicit and user-controllable (reopen, delete).
 - No avatar, human name, or "is typing…" indicator.
 - Session limit and periodic reminder "this is a tool, not a person".
 - Honest message when the quota is used up: "Daily limit reached, come back tomorrow."
@@ -168,7 +172,7 @@ Free tiers change without notice (e.g. Gemini cut by 50–80% in 2026) and are o
 - **GDPR**: data minimization; in Italy parental consent under 14; care with sensitive data.
 - **EU AI Act**: transparency obligation (the user must know they are talking to an AI); care with systems aimed at vulnerable people.
 - **Provider terms of use**: many restrict use by minors; also check whether the free tier uses data for training.
-- Do not store conversations on the server unless strictly necessary.
+- Conversations are stored on the server since 2026-11-16 (product decision). Consequences still to cover before opening to people outside the family: privacy notice, retention period, deletion on request (self-service deletion already exists).
 
 ## Working conventions
 

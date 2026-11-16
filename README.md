@@ -12,12 +12,15 @@ Success metric: **question solved, chat closed**.
 
 ## Status
 
-Early stage — working MVP slice, local only (not deployed):
+Early stage — working MVP:
 
-- sign-in with a personal access code, daily message limit per person;
+- Google sign-in; new accounts wait for an administrator's approval;
+- daily message limit per person;
 - chat through an OpenAI-compatible provider router;
 - every answer goes through a second "anti-sycophancy" review call;
-- fixed answers pointing to real services for sensitive topics.
+- conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
+- fixed answers pointing to real services for sensitive topics (never stored);
+- installable as a PWA.
 
 ## Development
 
@@ -25,17 +28,19 @@ Requires Node.js 22 or later.
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # then put your OpenAI key in it
-npm run db:migrate               # create the local D1 database
-npm run user:add -- "Name"       # prints the access code once
+cp .dev.vars.example .dev.vars   # fill in, or enable the local mocks
+npm run db:migrate               # create/update the local D1 database
+npm run mock                     # only when using the local mocks
 npm run dev
 ```
+
+The emails listed in `ADMIN_EMAILS` are approved automatically and can approve other users from the "Utenti" view.
 
 - `src/` — React frontend (Vite).
 - `worker/` — Cloudflare Worker (Hono), API under `/api/*`.
 - `migrations/` — D1 schema.
 - `npm test` runs the unit tests; `npm run build` typechecks and builds.
-- `npm run mock:llm` starts a local fake model for working without an API key (see `.dev.vars.example`).
+- `npm run mock` starts local stand-ins for the model and for Google sign-in, for working without real credentials (see `.dev.vars.example`).
 - `npm run deploy` deploys to Cloudflare.
 
 ## Contributing

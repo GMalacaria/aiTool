@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { answer, MAX_HISTORY_MESSAGES, parseConversation, truncateHistory, type ConversationMessage } from './chat';
+import { answer, MAX_HISTORY_MESSAGES, parseChatRequest, truncateHistory, type ConversationMessage } from './chat';
+import { titleFrom } from './conversations';
 import type { ChatMessage, ProviderRouter } from './llm/router';
 import { applyReview, REVIEW_SYSTEM_PROMPT, SYSTEM_PROMPT } from './prompts';
 import { detectSensitiveTopic } from './sensitive';
@@ -7,39 +8,53 @@ import { currentDay } from './usage';
 
 const user = (content: string): ConversationMessage => ({ role: 'user', content });
 const assistant = (content: string): ConversationMessage => ({ role: 'assistant', content });
+const CONVERSATION_ID = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
 
-describe('parseConversation', () => {
-  it('accepts a conversation ending with a user message and trims content', () => {
-    expect(parseConversation({ messages: [user(' a '), assistant('b'), user('c')] })).toEqual([
-      user('a'),
-      assistant('b'),
-      user('c'),
-    ]);
+describe('parseChatRequest', () => {
+  it('accepts a new conversation and trims the message', () => {
+    expect(parseChatRequest({ message: ' hello ' })).toEqual({ conversationId: null, message: 'hello' });
+  });
+
+  it('accepts an existing conversation id', () => {
+    expect(parseChatRequest({ conversationId: CONVERSATION_ID, message: 'hi' })).toEqual({
+      conversationId: CONVERSATION_ID,
+      message: 'hi',
+    });
   });
 
   it.each([
-    ['missing messages', {}],
-    ['empty list', { messages: [] }],
-    ['last message from assistant', { messages: [user('a'), assistant('b')] }],
-    ['system role', { messages: [{ role: 'system', content: 'x' }, user('a')] }],
-    ['blank content', { messages: [user('   ')] }],
-    ['too long content', { messages: [user('x'.repeat(4001))] }],
+    ['missing message', {}],
+    ['blank message', { message: '   ' }],
+    ['too long message', { message: 'x'.repeat(4001) }],
+    ['non-string message', { message: 42 }],
+    ['malformed conversation id', { conversationId: 'abc', message: 'hi' }],
     ['non-object payload', null],
   ])('rejects %s', (_label, payload) => {
-    expect(parseConversation(payload)).toBeNull();
+    expect(parseChatRequest(payload)).toBeNull();
   });
 });
 
 describe('truncateHistory', () => {
   it('keeps the most recent messages and starts from a user message', () => {
-    const conversation = Array.from({ length: 21 }, (_, index) =>
+    const history = Array.from({ length: 20 }, (_, index) =>
       index % 2 === 0 ? user(`q${index}`) : assistant(`a${index}`),
     );
-    const history = truncateHistory(conversation);
+    const truncated = truncateHistory(history);
 
-    expect(history.length).toBeLessThanOrEqual(MAX_HISTORY_MESSAGES);
-    expect(history[0].role).toBe('user');
-    expect(history.at(-1)).toEqual(user('q20'));
+    expect(truncated.length).toBeLessThanOrEqual(MAX_HISTORY_MESSAGES);
+    expect(truncated[0].role).toBe('user');
+    expect(truncated.at(-1)).toEqual(assistant('a19'));
+  });
+
+  it('returns nothing for an empty history', () => {
+    expect(truncateHistory([])).toEqual([]);
+  });
+});
+
+describe('titleFrom', () => {
+  it('collapses whitespace and shortens long questions', () => {
+    expect(titleFrom('  How\nare   things? ')).toBe('How are things?');
+    expect(titleFrom('x'.repeat(100))).toHaveLength(60);
   });
 });
 
@@ -65,13 +80,14 @@ describe('answer', () => {
     return { router: { complete } as unknown as ProviderRouter, complete };
   };
 
-  it('generates a draft and then reviews it', async () => {
+  it('sends the conversation history, then reviews the draft', async () => {
     const { router, complete } = routerReturning('Great question! Rome.', 'Rome.');
+    const history = [user('Hi'), assistant('Hello.')];
 
-    await expect(answer(router, [user('Capital of Italy?')])).resolves.toBe('Rome.');
+    await expect(answer(router, history, 'Capital of Italy?')).resolves.toBe('Rome.');
 
     const [draftCall, reviewCall] = complete.mock.calls.map(([messages]) => messages);
-    expect(draftCall[0]).toEqual({ role: 'system', content: SYSTEM_PROMPT });
+    expect(draftCall).toEqual([{ role: 'system', content: SYSTEM_PROMPT }, ...history, user('Capital of Italy?')]);
     expect(reviewCall[0]).toEqual({ role: 'system', content: REVIEW_SYSTEM_PROMPT });
     expect(reviewCall[1].content).toContain('Capital of Italy?');
     expect(reviewCall[1].content).toContain('Great question! Rome.');
@@ -79,12 +95,12 @@ describe('answer', () => {
 
   it('returns the draft when the review pass fails', async () => {
     const { router } = routerReturning('Rome.', new Error('rate limited'));
-    await expect(answer(router, [user('Capital of Italy?')])).resolves.toBe('Rome.');
+    await expect(answer(router, [], 'Capital of Italy?')).resolves.toBe('Rome.');
   });
 
   it('fails when the draft cannot be generated', async () => {
     const { router } = routerReturning(new Error('down'));
-    await expect(answer(router, [user('Capital of Italy?')])).rejects.toThrow('down');
+    await expect(answer(router, [], 'Capital of Italy?')).rejects.toThrow('down');
   });
 });
 

@@ -1,26 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ApiError, sendConversation, type Account, type ConversationMessage } from './api';
+import type { ConversationMessage } from './api';
 
 interface ChatProps {
-  accessCode: string;
-  account: Account;
-  onSignOut: () => void;
+  messages: ConversationMessage[];
+  pending: boolean;
+  error: string | null;
+  remaining: number;
+  dailyLimit: number;
+  /** Resolves to false when the message was not sent. */
+  onSend: (content: string) => Promise<boolean>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
 
-const ERROR_TEXT: Record<string, string> = {
-  daily_limit_reached: 'Limite giornaliero raggiunto, torna domani.',
-  invalid_request: 'Richiesta non valida. Avvia una nuova chat.',
-  service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
-};
-
-export function Chat({ accessCode, account, onSignOut }: ChatProps) {
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+export function Chat({ messages, pending, error, remaining, dailyLimit, onSend }: ChatProps) {
   const [draft, setDraft] = useState('');
-  const [remaining, setRemaining] = useState(account.remaining);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,30 +27,9 @@ export function Chat({ accessCode, account, onSignOut }: ChatProps) {
     const content = draft.trim();
     if (!content || pending || limitReached) return;
 
-    const conversation: ConversationMessage[] = [...messages, { role: 'user', content }];
-    setMessages(conversation);
     setDraft('');
-    setError(null);
-    setPending(true);
-
-    try {
-      const result = await sendConversation(accessCode, conversation);
-      setMessages([...conversation, { role: 'assistant', content: result.answer }]);
-      setRemaining(result.remaining);
-    } catch (cause) {
-      const code = cause instanceof ApiError ? cause.code : 'service_unavailable';
-      if (code === 'invalid_code') {
-        onSignOut();
-        return;
-      }
-      if (code === 'daily_limit_reached') setRemaining(0);
-      // Give the unsent message back so it is not lost.
-      setMessages(messages);
-      setDraft(content);
-      setError(ERROR_TEXT[code] ?? ERROR_TEXT.service_unavailable);
-    } finally {
-      setPending(false);
-    }
+    // Give the unsent message back so it is not lost.
+    if (!(await onSend(content))) setDraft(content);
   }
 
   function handleSubmit(event: FormEvent) {
@@ -71,28 +44,8 @@ export function Chat({ accessCode, account, onSignOut }: ChatProps) {
     }
   }
 
-  function startNewChat() {
-    setMessages([]);
-    setError(null);
-  }
-
   return (
-    <div className="chat">
-      <header className="chat-header">
-        <div>
-          <h1>ConoscenzIA</h1>
-          <p className="muted">Strumento informativo. Non è una persona.</p>
-        </div>
-        <div className="chat-actions">
-          <button type="button" onClick={startNewChat} disabled={pending || messages.length === 0}>
-            Nuova chat
-          </button>
-          <button type="button" onClick={onSignOut}>
-            Esci
-          </button>
-        </div>
-      </header>
-
+    <>
       <main className="chat-messages" aria-live="polite">
         {messages.length === 0 && <p className="muted">Scrivi una domanda.</p>}
         {messages.map((message, index) => (
@@ -130,13 +83,13 @@ export function Chat({ accessCode, account, onSignOut }: ChatProps) {
         />
         <div className="chat-form-footer">
           <span className="muted">
-            Messaggi rimasti oggi: {remaining} di {account.dailyLimit}
+            Messaggi rimasti oggi: {remaining} di {dailyLimit}
           </span>
-          <button type="submit" disabled={pending || limitReached || !draft.trim()}>
+          <button type="submit" className="button-primary" disabled={pending || limitReached || !draft.trim()}>
             Invia
           </button>
         </div>
       </form>
-    </div>
+    </>
   );
 }
