@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  --text: light-dark(#1a1a1a, #ececec);
+  --muted: light-dark(#5c5c5c, #a3a3a3);
+  --background: light-dark(#ffffff, #161616);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--background);
+}
+
+.page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.status {
+  color: var(--muted);
+}

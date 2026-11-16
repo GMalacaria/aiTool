@@ -12,7 +12,20 @@ Success metric: **question solved, chat closed**.
 
 ## Status
 
-Early stage — project setup. No runnable code yet.
+Early stage — project scaffold only (React frontend + Cloudflare Worker with a health endpoint). No chat yet.
+
+## Development
+
+Requires Node.js 22 or later.
+
+```bash
+npm install
+npm run dev
+```
+
+- `src/` — React frontend (Vite).
+- `worker/` — Cloudflare Worker (Hono), API under `/api/*`.
+- `npm run build` typechecks and builds; `npm run deploy` deploys to Cloudflare.
 
 ## Contributing
 

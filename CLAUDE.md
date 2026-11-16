@@ -70,12 +70,25 @@ Rules:
 - Avoid providers with data outside the EU without guarantees (e.g. DeepSeek), since users are family members, including teenagers.
 - The multi-provider router also protects against price changes.
 
+## MVP decisions (confirmed 2026-11-16)
+
+- **Backend stack**: Cloudflare Workers (free tier), TypeScript, Hono. The React frontend is served by the same Worker as static assets.
+- **Login**: personal access code. The developer creates one code per family member; no email or password. The daily limit is per person.
+- **First provider**: OpenAI GPT-6 Luna from the start; free tiers are added later as fallback through the router.
+- **Anti-sycophancy check**: on every answer (second call that verifies and, if needed, rewrites).
+
 ## To be confirmed
 
 - MVP for adults only (minors bring much heavier legal and safety obligations).
-- Backend stack: Node on Cloudflare Workers (free tier) or an equivalent alternative.
-- Login: anonymous with a per-device/IP limit, or lightweight login.
-- Anti-sycophancy check on all answers or sampled (it doubles the calls).
+
+## Development
+
+- `npm run dev` — Vite dev server with the Worker running locally (frontend + `/api/*`).
+- `npm run typecheck` / `npm run build` — must pass before opening a PR.
+- `npm run deploy` — build and deploy to Cloudflare (needs `wrangler login`).
+- Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`).
+- Local secrets go in `.dev.vars` (git-ignored); production secrets via `wrangler secret put`.
+- The project `.npmrc` pins the public npm registry: never let the lockfile reference another registry.
 
 ## Architecture
 
