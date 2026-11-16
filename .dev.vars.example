@@ -1,0 +1,6 @@
+# Copy to .dev.vars (git-ignored) and fill in. Never commit real keys.
+OPENAI_API_KEY=replace-with-your-openai-key
+
+# Optional: point the OpenAI provider at another OpenAI-compatible endpoint,
+# e.g. the local mock started with `npm run mock:llm`.
+# OPENAI_BASE_URL=http://127.0.0.1:8788/v1

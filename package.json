@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "deploy": "npm run build && wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "test": "vitest run",
+    "user:add": "node scripts/add-user.mjs",
+    "mock:llm": "node scripts/mock-llm.mjs",
+    "db:migrate": "wrangler d1 migrations apply aitool --local",
+    "db:migrate:remote": "wrangler d1 migrations apply aitool --remote"
   },
   "dependencies": {
     "hono": "^4.13.18",
@@ -24,6 +29,7 @@
     "@vitejs/plugin-react": "^6.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
+    "vitest": "^4.1.12",
     "wrangler": "^4.162.0"
   }
 }
