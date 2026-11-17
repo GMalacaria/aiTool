@@ -1,17 +1,29 @@
 :root {
+  /* Follows the system by default; Settings can pin light or dark through <meta name="color-scheme">. */
   color-scheme: light dark;
   font-family: system-ui, sans-serif;
   line-height: 1.5;
-  --text: light-dark(#1a1a1a, #ececec);
-  --muted: light-dark(#5c5c5c, #a3a3a3);
-  --background: light-dark(#ffffff, #161616);
-  --surface: light-dark(#f3f3f3, #232323);
-  --border: light-dark(#c9c9c9, #454545);
-  --accent: light-dark(#1f4e8c, #8ab4f0);
-  --on-accent: light-dark(#ffffff, #10233d);
+
+  /* Light-blue palette: calm and clear, not grey. */
+  --text: light-dark(#10202e, #e4eef7);
+  --muted: light-dark(#4d6478, #9cb3c6);
+  --background: light-dark(#f7fbff, #0d1620);
+  --surface: light-dark(#e8f3fc, #142130);
+  --surface-strong: light-dark(#d6eaf9, #1b2d40);
+  --border: light-dark(#cbdeed, #263a4e);
+  --accent: light-dark(#1a70ad, #7cc4f5);
+  --on-accent: light-dark(#ffffff, #082032);
   --error: light-dark(#a12626, #f09a9a);
-  --hover: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
-  --selected: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.12));
+  --hover: light-dark(rgb(26 112 173 / 0.08), rgb(124 196 245 / 0.1));
+  --selected: light-dark(rgb(26 112 173 / 0.15), rgb(124 196 245 / 0.17));
+
+  &:has(> head > meta[name='color-scheme'][content='dark']) {
+    color-scheme: dark;
+  }
+
+  &:has(> head > meta[name='color-scheme'][content='light']) {
+    color-scheme: light;
+  }
 }
 
 *,
@@ -1077,4 +1089,38 @@ select {
 .stat-meter {
   width: 100%;
   height: 0.5rem;
+}
+
+/* Radio groups in Settings */
+
+.choice-group {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice-group legend {
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.choice {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.choice:hover {
+  background: var(--hover);
+}
+
+.choice input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
 }
