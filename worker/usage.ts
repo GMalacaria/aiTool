@@ -76,3 +76,38 @@ export async function refundDeepMessage(db: D1Database, user: User, day: string)
     .bind(user.id, day)
     .run();
 }
+
+export async function getUsedImages(db: D1Database, user: User, day: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT images FROM daily_usage WHERE user_id = ? AND day = ?')
+    .bind(user.id, day)
+    .first<{ images: number }>();
+  return row?.images ?? 0;
+}
+
+/**
+ * Atomically takes one image from today's allowance. Call it after
+ * `consumeMessage`, which creates today's row. Returns the new count, or null
+ * when the allowance is used up.
+ */
+export async function consumeImage(db: D1Database, user: User, day: string): Promise<number | null> {
+  if (user.dailyImageLimit <= 0) return null;
+
+  const row = await db
+    .prepare(
+      `UPDATE daily_usage SET images = images + 1
+       WHERE user_id = ?1 AND day = ?2 AND images < ?3
+       RETURNING images`,
+    )
+    .bind(user.id, day, user.dailyImageLimit)
+    .first<{ images: number }>();
+
+  return row?.images ?? null;
+}
+
+export async function refundImage(db: D1Database, user: User, day: string): Promise<void> {
+  await db
+    .prepare('UPDATE daily_usage SET images = images - 1 WHERE user_id = ? AND day = ? AND images > 0')
+    .bind(user.id, day)
+    .run();
+}

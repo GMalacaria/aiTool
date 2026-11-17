@@ -38,11 +38,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content, kind, attachments FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content, kind, attachments FROM (
-               SELECT id, role, content, kind, attachments FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT role, content, kind, attachments, imageId FROM (
+               SELECT id, role, content, kind, attachments, image_id AS imageId FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -60,18 +60,27 @@ export async function saveExchange(
   answer: string,
   answerKind: MessageKind = 'text',
   attachments: StoredAttachments | null = null,
+  /** A generated image shown with the answer; its file is already in R2. */
+  image: { id: string; mimeType: string } | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
-    'INSERT INTO messages (conversation_id, role, content, kind, attachments) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id) VALUES (?, ?, ?, ?, ?, ?)',
   );
 
   await db.batch([
     conversationId
       ? db.prepare('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').bind(id, user.id)
       : db.prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)').bind(id, user.id, titleFrom(question)),
-    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null),
-    insertMessage.bind(id, 'assistant', answer, answerKind, null),
+    ...(image
+      ? [
+          db
+            .prepare('INSERT INTO generated_images (id, user_id, conversation_id, mime_type) VALUES (?, ?, ?, ?)')
+            .bind(image.id, user.id, id, image.mimeType),
+        ]
+      : []),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null),
+    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null),
   ]);
 
   const conversation = await findConversation(db, user, id);
@@ -79,10 +88,39 @@ export async function saveExchange(
   return conversation;
 }
 
-export async function deleteConversation(db: D1Database, user: User, id: string): Promise<void> {
+/** Removes image files from R2 first: an orphaned file would keep a deleted conversation's content alive. */
+async function deleteImageFiles(bucket: R2Bucket, ids: string[]): Promise<void> {
+  for (let start = 0; start < ids.length; start += 1000) await bucket.delete(ids.slice(start, start + 1000));
+}
+
+async function imageIds(db: D1Database, where: string, value: string | number): Promise<string[]> {
+  const { results } = await db.prepare(`SELECT id FROM generated_images WHERE ${where}`).bind(value).all<{ id: string }>();
+  return results.map((row) => row.id);
+}
+
+export async function deleteConversation(db: D1Database, bucket: R2Bucket, user: User, id: string): Promise<void> {
+  const owned = await findConversation(db, user, id);
+  if (!owned) return;
+
+  await deleteImageFiles(bucket, await imageIds(db, 'conversation_id = ?', id));
   await db.prepare('DELETE FROM conversations WHERE id = ? AND user_id = ?').bind(id, user.id).run();
 }
 
-export async function deleteAllConversations(db: D1Database, user: User): Promise<void> {
+export async function deleteAllConversations(db: D1Database, bucket: R2Bucket, user: User): Promise<void> {
+  await deleteImageFiles(bucket, await imageIds(db, 'user_id = ?', user.id));
   await db.prepare('DELETE FROM conversations WHERE user_id = ?').bind(user.id).run();
+}
+
+/** Deletes the account with everything attached to it, image files included. */
+export async function deleteAccount(db: D1Database, bucket: R2Bucket, user: User): Promise<void> {
+  await deleteImageFiles(bucket, await imageIds(db, 'user_id = ?', user.id));
+  await db.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
+}
+
+/** The image of a message, only for its owner. */
+export async function findImage(db: D1Database, user: User, id: string): Promise<{ mimeType: string } | null> {
+  return db
+    .prepare('SELECT mime_type AS mimeType FROM generated_images WHERE id = ? AND user_id = ?')
+    .bind(id, user.id)
+    .first<{ mimeType: string }>();
 }

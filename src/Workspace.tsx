@@ -24,6 +24,7 @@ interface WorkspaceProps {
 
 const ERROR_TEXT: Record<string, string> = {
   daily_limit_reached: 'Limite giornaliero raggiunto, torna domani.',
+  image_limit_reached: 'Limite giornaliero di immagini raggiunto, torna domani.',
   invalid_request: 'Richiesta non valida.',
   not_found: 'Conversazione non trovata.',
   service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
@@ -37,6 +38,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [remaining, setRemaining] = useState(account.remaining);
   const [deepRemaining, setDeepRemaining] = useState(account.deepRemaining);
+  const [imageRemaining, setImageRemaining] = useState(account.imageRemaining);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'users'>('chat');
@@ -110,9 +112,10 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
 
     try {
       const result = await sendMessage(activeId, content, attachments, deep);
-      setMessages([...previous, question, { role: 'assistant', content: result.answer, document: result.document }]);
+      setMessages([...previous, question, { role: 'assistant', content: result.answer, document: result.document, image: result.image }]);
       setRemaining(result.remaining);
       if (result.deepRemaining !== undefined) setDeepRemaining(result.deepRemaining);
+      if (result.imageRemaining !== undefined) setImageRemaining(result.imageRemaining);
 
       const saved = result.conversation;
       if (saved) {
@@ -122,7 +125,9 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       return true;
     } catch (cause) {
       setMessages(previous);
-      if (handleFailure(cause) === 'daily_limit_reached') setRemaining(0);
+      const code = handleFailure(cause);
+      if (code === 'daily_limit_reached') setRemaining(0);
+      if (code === 'image_limit_reached') setImageRemaining(0);
       return false;
     } finally {
       setPending(false);
@@ -249,6 +254,9 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             remaining={remaining}
             dailyLimit={account.dailyLimit}
             deepRemaining={deepRemaining}
+            imagesEnabled={account.imagesEnabled}
+            imageRemaining={imageRemaining}
+            imageLimit={account.imageLimit}
             onSend={send}
           />
         )}

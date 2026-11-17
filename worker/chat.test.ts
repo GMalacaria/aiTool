@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   detectIntent,
+  IMAGES_OFF_TEXT,
+  IMAGES_UNAVAILABLE_TEXT,
   MAX_HISTORY_MESSAGES,
   parseChatRequest,
   questionContent,
@@ -15,7 +17,10 @@ import {
   applyReview,
   DEEP_INSTRUCTION,
   DOCUMENT_SYSTEM_PROMPT,
+  IMAGE_PROMPT_SYSTEM_PROMPT,
+  imageMessageContent,
   INTENT_SYSTEM_PROMPT,
+  parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -34,6 +39,10 @@ const CONVERSATION_ID = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
 const NO_ATTACHMENTS = { documents: [], images: [] };
 
 interface Script {
+  /** What the image planner replies (JSON), and what moderation says per text. */
+  plan?: string | Error;
+  flagged?: (text: string) => boolean | Error;
+  imagesEnabled?: boolean;
   /** What the intent call replies; an Error makes it fail. */
   intent?: string | Error;
   /** What the model writes: a text answer, or the JSON of a document. */
@@ -43,23 +52,39 @@ interface Script {
 }
 
 /** Routers whose replies depend on which system prompt they receive. */
-function fakeRouters({ intent = 'text', draft = 'Answer.', review = 'OK', deep = false }: Script = {}) {
+function fakeRouters({
+  intent = 'text',
+  draft = 'Answer.',
+  review = 'OK',
+  deep = false,
+  plan = '{"allowed":false,"prompt":"","refusal":"no"}',
+  flagged = () => false,
+  imagesEnabled = true,
+}: Script = {}) {
   const reply = (value: string | Error) => {
     if (value instanceof Error) throw value;
     return value;
   };
   const draftComplete = vi.fn(async (_messages: ChatMessage[], _options: CompletionOptions) => reply(draft));
   const standardComplete = vi.fn(async (messages: ChatMessage[], _options: CompletionOptions) =>
-    reply(messages[0].content === INTENT_SYSTEM_PROMPT ? intent : review),
+    reply(
+      messages[0].content === INTENT_SYSTEM_PROMPT ? intent : messages[0].content === IMAGE_PROMPT_SYSTEM_PROMPT ? plan : review,
+    ),
   );
+  const isFlagged = vi.fn(async (text: string) => {
+    const verdict = flagged(text);
+    if (verdict instanceof Error) throw verdict;
+    return verdict;
+  });
   const routers: Routers = {
     draft: { complete: draftComplete } as unknown as ProviderRouter,
     review: { complete: standardComplete } as unknown as ProviderRouter,
     deep,
+    images: { enabled: imagesEnabled, isFlagged },
   };
   const callsWith = (systemPrompt: string) =>
     standardComplete.mock.calls.filter(([messages]) => messages[0].content === systemPrompt);
-  return { routers, draftComplete, standardComplete, callsWith };
+  return { routers, draftComplete, standardComplete, callsWith, isFlagged };
 }
 
 describe('parseChatRequest', () => {
@@ -152,7 +177,7 @@ describe('intent detection', () => {
 
     const [messages, options] = standardComplete.mock.calls[0];
     expect(messages[0]).toEqual({ role: 'system', content: INTENT_SYSTEM_PROMPT });
-    expect(messages[1].content).toContain('<previous_answer_was_document>yes</previous_answer_was_document>');
+    expect(messages[1].content).toContain('<previous_answer>document</previous_answer>');
     expect(messages[1].content).toContain('<attached_files>a.pdf</attached_files>');
     expect(messages[1].content).toContain('Add two questions');
     expect(messages[1].content).not.toContain('Body');
@@ -226,6 +251,117 @@ describe('respond with text', () => {
     const past = draftComplete.mock.calls[0][0][2].content;
     expect(past).toContain('[A document was created and shown to the user');
     expect(past).toContain(stored);
+  });
+});
+
+describe('image intent', () => {
+  it.each([
+    ['image', 'image'],
+    [' Image. ', 'image'],
+    ['an image of a cat', 'text'],
+  ])('reads %j as %s', (reply, expected) => {
+    expect(parseIntent(reply)).toBe(expected);
+  });
+
+  it('tells the classifier that only explicit picture requests are images', () => {
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/image: ONLY when the user explicitly asks for a picture/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/Questions about attached images are text/);
+  });
+
+  it('passes the kind of the previous answer to the classifier', async () => {
+    const { routers, standardComplete } = fakeRouters({ intent: 'image' });
+    const history: ConversationMessage[] = [user('Draw a cat'), { ...assistant(imageMessageContent('a cat')), imageId: 'img-1' }];
+
+    await expect(detectIntent(routers.review, history, 'Make it blue', NO_ATTACHMENTS)).resolves.toBe('image');
+    expect(standardComplete.mock.calls[0][0][1].content).toContain('<previous_answer>image</previous_answer>');
+  });
+});
+
+describe('respond with an image request', () => {
+  const allowed = JSON.stringify({ allowed: true, prompt: 'A red kite over a green hill, watercolour', refusal: '' });
+
+  it('plans an allowed request and checks both the message and the prompt', async () => {
+    const { routers, isFlagged, standardComplete } = fakeRouters({ intent: 'image', plan: allowed });
+
+    await expect(respond(routers, [], 'Disegnami un aquilone rosso')).resolves.toEqual({
+      image: { prompt: 'A red kite over a green hill, watercolour' },
+    });
+
+    expect(isFlagged.mock.calls.map(([text]) => text)).toEqual([
+      'Disegnami un aquilone rosso',
+      'A red kite over a green hill, watercolour',
+    ]);
+    const planCall = standardComplete.mock.calls.find(([messages]) => messages[0].content === IMAGE_PROMPT_SYSTEM_PROMPT)!;
+    expect(planCall[1]).toMatchObject({ json: true, fast: true });
+  });
+
+  it('gives the planner the earlier image description so a change builds on it', async () => {
+    const { routers, standardComplete } = fakeRouters({ intent: 'image', plan: allowed });
+    const history: ConversationMessage[] = [
+      user('Draw a kite'),
+      { ...assistant(imageMessageContent('A kite')), imageId: 'img-1' },
+    ];
+
+    await respond(routers, history, 'Make it blue');
+
+    const planCall = standardComplete.mock.calls.find(([messages]) => messages[0].content === IMAGE_PROMPT_SYSTEM_PROMPT)!;
+    expect(planCall[0][2]).toEqual({ role: 'assistant', content: 'Image generated from this description: A kite' });
+  });
+
+  it('refuses without generating when the planner says it is not allowed', async () => {
+    const plan = JSON.stringify({ allowed: false, prompt: '', refusal: 'Non posso creare immagini di persone reali.' });
+    const { routers, isFlagged } = fakeRouters({ intent: 'image', plan });
+
+    await expect(respond(routers, [], 'Disegna una foto di una persona famosa')).resolves.toEqual({
+      text: 'Non posso creare immagini di persone reali.',
+    });
+    expect(isFlagged).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses when moderation flags the message or the prepared prompt', async () => {
+    const message = fakeRouters({ intent: 'image', plan: allowed, flagged: (text) => text === 'bad request' });
+    await expect(respond(message.routers, [], 'bad request')).resolves.toMatchObject({ text: expect.any(String) });
+    expect(message.standardComplete.mock.calls.some(([m]) => m[0].content === IMAGE_PROMPT_SYSTEM_PROMPT)).toBe(false);
+
+    const prompt = fakeRouters({ intent: 'image', plan: allowed, flagged: (text) => text.startsWith('A red kite') });
+    const reply = await respond(prompt.routers, [], 'Disegnami un aquilone rosso');
+    expect(reply.image).toBeUndefined();
+    expect(reply.text).toBeDefined();
+  });
+
+  it.each([
+    ['moderation is unavailable', { flagged: () => new Error('down') }],
+    ['the planner fails', { plan: new Error('down') }],
+  ])('fails closed when %s', async (_label, script) => {
+    const { routers } = fakeRouters({ intent: 'image', plan: allowed, ...script });
+    await expect(respond(routers, [], 'Disegnami un aquilone')).resolves.toEqual({ text: IMAGES_UNAVAILABLE_TEXT });
+  });
+
+  it('refuses a plan that is not valid', async () => {
+    const { routers } = fakeRouters({ intent: 'image', plan: 'not json' });
+    await expect(respond(routers, [], 'Disegnami un aquilone')).resolves.toMatchObject({ text: expect.any(String) });
+  });
+
+  it('says so when image generation is off', async () => {
+    const { routers } = fakeRouters({ intent: 'image', imagesEnabled: false });
+    await expect(respond(routers, [], 'Disegnami un aquilone')).resolves.toEqual({ text: IMAGES_OFF_TEXT });
+  });
+});
+
+describe('parseImagePlan', () => {
+  it('accepts an allowed plan and a refusal', () => {
+    expect(parseImagePlan('{"allowed":true,"prompt":" a cat ","refusal":""}')).toEqual({ allowed: true, prompt: 'a cat' });
+    expect(parseImagePlan('{"allowed":false,"prompt":"","refusal":"No."}')).toEqual({ allowed: false, refusal: 'No.' });
+    expect(parseImagePlan('{"allowed":false}')).toMatchObject({ allowed: false, refusal: expect.any(String) });
+  });
+
+  it.each([
+    ['not JSON', 'nope'],
+    ['an allowed plan without a prompt', '{"allowed":true,"prompt":"  "}'],
+    ['a prompt that is too long', JSON.stringify({ allowed: true, prompt: 'x'.repeat(2000) })],
+    ['a plan without a verdict', '{"prompt":"a cat"}'],
+  ])('rejects %s', (_label, raw) => {
+    expect(parseImagePlan(raw)).toBeNull();
   });
 });
 

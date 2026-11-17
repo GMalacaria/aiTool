@@ -14,6 +14,9 @@ import {
   DEEP_INSTRUCTION,
   DOCUMENT_SYSTEM_PROMPT,
   INTENT_SYSTEM_PROMPT,
+  IMAGE_PROMPT_SYSTEM_PROMPT,
+  IMAGE_REFUSAL_FALLBACK,
+  parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
@@ -26,6 +29,7 @@ const MAX_OUTPUT_TOKENS = 700;
 const MAX_DEEP_OUTPUT_TOKENS = 1800;
 const MAX_DOCUMENT_OUTPUT_TOKENS = 4000;
 const MAX_INTENT_OUTPUT_TOKENS = 200;
+const MAX_IMAGE_PLAN_OUTPUT_TOKENS = 600;
 const LONG_TIMEOUT_MS = 90_000;
 const INTENT_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -39,6 +43,8 @@ export interface ConversationMessage {
   kind: MessageKind;
   /** Attachments stored with a user message (document text, image names). */
   attachments: StoredAttachments | null;
+  /** The generated image shown with an assistant message. */
+  imageId?: string | null;
 }
 
 export interface ChatRequest {
@@ -154,9 +160,28 @@ export interface Routers {
   /** Always the standard model: intent detection and the review pass. */
   review: ProviderRouter;
   deep: boolean;
+  /** Image generation; absent or disabled means the feature is off. */
+  images?: {
+    enabled: boolean;
+    /** True when the text is flagged by moderation; rejects when moderation is unavailable. */
+    isFlagged: (text: string) => Promise<boolean>;
+  };
 }
 
-export type Reply = { text: string; document?: undefined } | { document: DocumentSpec; text?: undefined };
+export type Reply =
+  | { text: string; document?: undefined; image?: undefined }
+  | { document: DocumentSpec; text?: undefined; image?: undefined }
+  /** An allowed image request, with the English description for the generator. */
+  | { image: { prompt: string }; text?: undefined; document?: undefined };
+
+export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
+export const IMAGES_UNAVAILABLE_TEXT = 'La creazione di immagini non è disponibile in questo momento. Riprova più tardi.';
+
+function previousAnswer(history: ConversationMessage[]): 'text' | 'document' | 'image' {
+  const last = history.at(-1);
+  if (last?.kind === 'document') return 'document';
+  return last?.imageId ? 'image' : 'text';
+}
 
 /**
  * Decides from the message alone whether the user wants a document. There is
@@ -167,14 +192,14 @@ export async function detectIntent(
   history: ConversationMessage[],
   question: string,
   attachments: Attachments,
-): Promise<MessageKind> {
+): Promise<'text' | 'document' | 'image'> {
   try {
     const reply = await router.complete(
       [
         { role: 'system', content: INTENT_SYSTEM_PROMPT },
         {
           role: 'user',
-          content: buildIntentInput(question, history.at(-1)?.kind === 'document', attachmentNames(attachments)),
+          content: buildIntentInput(question, previousAnswer(history), attachmentNames(attachments)),
         },
       ],
       { maxOutputTokens: MAX_INTENT_OUTPUT_TOKENS, fast: true, timeoutMs: INTENT_TIMEOUT_MS },
@@ -207,12 +232,49 @@ export async function respond(
   // A failure is reported only if this draft ends up being used.
   speculativeDraft?.catch(() => undefined);
 
-  if ((await intent) === 'document') {
+  const detected = await intent;
+  if (detected === 'document') {
     return { document: await createDocument(routers.draft, history, question, attachments) };
   }
+  if (detected === 'image') return planImage(routers, history, question);
 
   const draft = await (speculativeDraft ?? draftText(routers, history, question, attachments));
   return { text: await reviewText(routers, question, attachments, draft) };
+}
+
+/**
+ * Checks an image request and prepares the generator's prompt. Images are never
+ * produced unchecked: if moderation or the planner is unavailable the answer is
+ * a refusal, not an unchecked image.
+ */
+async function planImage(routers: Routers, history: ConversationMessage[], question: string): Promise<Reply> {
+  const images = routers.images;
+  if (!images?.enabled) return { text: IMAGES_OFF_TEXT };
+
+  try {
+    if (await images.isFlagged(question)) return { text: IMAGE_REFUSAL_FALLBACK };
+
+    const raw = await routers.review.complete(
+      buildMessages(IMAGE_PROMPT_SYSTEM_PROMPT, history, question, { documents: [], images: [] }, 'text'),
+      {
+        maxOutputTokens: MAX_IMAGE_PLAN_OUTPUT_TOKENS,
+        json: true,
+        fast: true,
+        timeoutMs: INTENT_TIMEOUT_MS * 2,
+        containsAttachments: usesAttachments(history, { documents: [], images: [] }),
+      },
+    );
+    const plan = parseImagePlan(raw);
+    if (!plan) return { text: IMAGE_REFUSAL_FALLBACK };
+    if (!plan.allowed) return { text: plan.refusal };
+
+    // The description sent to the generator is checked as well.
+    if (await images.isFlagged(plan.prompt)) return { text: IMAGE_REFUSAL_FALLBACK };
+    return { image: { prompt: plan.prompt } };
+  } catch (error) {
+    console.warn('image request could not be checked', error);
+    return { text: IMAGES_UNAVAILABLE_TEXT };
+  }
 }
 
 function draftText(
