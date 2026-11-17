@@ -60,6 +60,7 @@ function SearchPanel({ onOpenConversation, onClose }: Omit<SearchDialogProps, 'o
         type="search"
         placeholder="Cerca nei titoli e nei messaggi"
         autoFocus
+        data-autofocus
         autoComplete="off"
         value={query}
         onChange={(event) => setQuery(event.target.value)}

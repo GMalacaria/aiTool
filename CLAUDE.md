@@ -1,4 +1,4 @@
-# CLAUDE.md — ConoscenzIA (code name: aiTool)
+# CLAUDE.md — Kern (code name: aiTool)
 
 ## Repository rules
 
@@ -10,9 +10,9 @@
 
 ## Name
 
-- **Visible name** (UI, icon, PWA title): **ConoscenzIA**.
+- **Visible name** (UI, icon, PWA title): **Kern**.
 - **Code name** (repository, packages, variables, identifiers): **aiTool**.
-- ConoscenzIA is for family and Italian use; an international launch would need a distinctive name that is pronounceable in several languages, to be checked (domain and UIBM/EUIPO trademark) before launch. "Utilis" was discarded: already used in software.
+- Kern is for family and Italian use; an international launch would need a distinctive name that is pronounceable in several languages, to be checked (domain and UIBM/EUIPO trademark) before launch. "Utilis" was discarded: already used in software.
 
 ## Project goal
 
@@ -86,6 +86,8 @@ Rules:
 - ChatGPT-style sidebar (`src/ui/Sidebar.tsx`): tool name with a search icon (also Ctrl/Cmd+K) and a collapse icon (collapsed state remembered per device; on phones the sidebar is an overlay); "Nuova chat"; scrollable list of chats with fixed width, one line, fading end; rename and delete appear on hover or focus (always on touch screens) and open native modal dialogs (`src/ui/Modal.tsx`, `<dialog>` with `showModal()` and `closedby="any"` plus a light-dismiss fallback). The footer shows the user's name and profile and opens a popover menu (Popover API, anchored with `position-area`, fixed fallback): Profilo, Impostazioni, Utenti (admins only), Esci.
 - New conversations get a 2–4 word title from the standard model, generated from the question in parallel with the answer (metered, purpose `title`); the start of the question is the fallback.
 - Search (`GET /api/conversations/search?q=`) matches titles and message text (case-insensitive `LIKE`, wildcards escaped), returns an excerpt around the match.
+- Signed-out page (`src/Login.tsx`): looks like the chat with an anonymous sidebar (brand, "Nuova chat", "Accedi per salvare le chat e ritrovarle qui", "Accedi" button). Clicking the request field, typing, attaching or starting a chat opens a native modal with the Kern wordmark, a one-line description, the approval note and "Accedi con Google". A failed sign-in reopens it with the error.
+- Brand assets: `public/icon.svg` is the K mark (favicon, sidebar brand); app icons (`icon-192/512.png`, `apple-touch-icon.png`) are rendered from it on a light background; `public/brand/kern-wordmark.png` is the wordmark with real transparency (the source JPEGs had a painted checkerboard). Source artwork lives in `design/` (not deployed).
 - Chat page: no header. An empty chat shows, centred, a rotating phrase ("Sono uno strumento a tua disposizione", "Da dove iniziamo?", "Di cosa hai bisogno?") above the composer; after the first message the thread scrolls with the composer at the bottom. The user's messages are right-aligned bubbles, answers are left-aligned without bubble and without "Domanda/Risposta" labels (kept for screen readers only). Composer: one line that grows with the text (`field-sizing: content`), "+" for attachments, a select "Normale / Ragiona n/m" (in-depth answer; disabled when none left or in free mode), round send button shown only on touch screens and narrow windows (Enter sends on a keyboard); below, today's counters and "Strumento di intelligenza artificiale: può commettere errori". While waiting, rotating impersonal status texts with moving dots (no animation with reduced motion).
 - Look: light-blue palette (tokens on `:root` with `light-dark()`). Light/dark follows the device by default; Settings → Aspetto can pin light or dark for this device (`src/theme.ts`: stored in `localStorage` as `color-scheme`, applied through `<meta name="color-scheme">` by an inline script in `index.html` before the first paint, mapped back to the `color-scheme` property in CSS; synced across tabs).
 - Users page (admin): an accordion of native `<details>`, all closed; each row shows name, email, status, profile and today's use, and opens to the limits, profile and usage.

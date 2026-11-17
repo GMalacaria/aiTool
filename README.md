@@ -1,4 +1,4 @@
-# aiTool (ConoscenzIA)
+# aiTool (Kern)
 
 A free web app for asking questions to a generative AI that behaves like a tool, not a companion:
 

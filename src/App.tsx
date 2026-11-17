@@ -48,7 +48,7 @@ export function App() {
     case 'unavailable':
       return (
         <main className="page">
-          <h1>ConoscenzIA</h1>
+          <h1>Kern</h1>
           <p role="alert" className="error">
             Servizio non disponibile. Riprova più tardi.
           </p>

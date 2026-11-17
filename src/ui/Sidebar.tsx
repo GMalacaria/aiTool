@@ -1,5 +1,6 @@
 import { useId, useRef } from 'react';
 import type { Account, ConversationSummary } from '../api';
+import { Brand } from '../Login';
 import { ChevronIcon, NewChatIcon, PencilIcon, SearchIcon, SidebarIcon, TrashIcon } from './icons';
 
 export type View = 'chat' | 'profile' | 'settings' | 'users';
@@ -48,7 +49,7 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Chat e account">
       <div className="sidebar-top">
-        <span className="brand">ConoscenzIA</span>
+        <Brand />
         <button type="button" className="icon-button" aria-label="Cerca nelle chat" title="Cerca (Ctrl+K)" onClick={onSearch}>
           <SearchIcon />
         </button>

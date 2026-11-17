@@ -1,5 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#1a70ad"/>
-  <circle cx="256" cy="158" r="36" fill="#ffffff"/>
-  <rect x="222" y="222" width="68" height="168" rx="34" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Sfumatura asta verticale sinistra (blu scuro profondo) -->
+    <linearGradient id="grad-stem" x1="0%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#0E3870" />
+      <stop offset="100%" stop-color="#041633" />
+    </linearGradient>
+
+    <!-- Sfumatura gamba diagonale inferiore destra -->
+    <linearGradient id="grad-leg" x1="15%" y1="15%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#092B5A" />
+      <stop offset="50%" stop-color="#2263AE" />
+      <stop offset="100%" stop-color="#76BEFA" />
+    </linearGradient>
+
+    <!-- Sfumatura piega centrale 3D -->
+    <linearGradient id="grad-fold" x1="0%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#2364B4" />
+      <stop offset="55%" stop-color="#5AA5EA" />
+      <stop offset="100%" stop-color="#9BD3FF" />
+    </linearGradient>
+
+    <!-- Sfumatura braccio diagonale superiore destro -->
+    <linearGradient id="grad-arm" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0D3A74" />
+      <stop offset="48%" stop-color="#3179C4" />
+      <stop offset="100%" stop-color="#87C8FC" />
+    </linearGradient>
+
+    <!-- Sfumatura nastro frontale inferiore sinistro -->
+    <linearGradient id="grad-ribbon" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3E85D8" />
+      <stop offset="55%" stop-color="#6DB9F7" />
+      <stop offset="100%" stop-color="#A6D9FF" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Asta verticale sinistra -->
+  <path d="M 106,120 C 106,84 128,64 164,64 L 204,64 L 204,350 L 106,350 Z" fill="url(#grad-stem)" />
+
+  <!-- 2. Gamba diagonale inferiore destra -->
+  <path d="M 222,282 L 296,216 L 424,448 L 324,448 C 296,448 282,438 264,414 L 198,326 Z" fill="url(#grad-leg)" />
+
+  <!-- 3. Piega centrale interna del nastro (bordo inferiore allineato a 45° con il nastro) -->
+  <path d="M 204,196 L 278,244 C 294,234 312,235 326,246 L 234,346 L 198,318 Z" fill="url(#grad-fold)" />
+
+  <!-- 4. Braccio diagonale superiore destro -->
+  <path d="M 218,180 L 284,88 C 298,70 312,64 338,64 L 424,64 L 316,218 C 304,234 290,240 268,240 L 234,240 C 212,240 204,226 204,206 C 204,196 209,189 218,180 Z" fill="url(#grad-arm)" />
+
+  <!-- 5. Nastro frontale inferiore sinistro -->
+  <path d="M 106,338 C 106,315 118,298 138,274 L 204,195 L 204,376 L 166,426 C 150,444 136,448 122,448 C 110,448 106,438 106,422 Z" fill="url(#grad-ribbon)" />
 </svg>

@@ -8,7 +8,7 @@ interface WaitingProps {
 export function Waiting({ account, onSignOut }: WaitingProps) {
   return (
     <main className="page">
-      <h1>ConoscenzIA</h1>
+      <h1>Kern</h1>
       <p role="status">
         {account.status === 'blocked'
           ? 'Questo account non è abilitato.'
