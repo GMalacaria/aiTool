@@ -1475,9 +1475,9 @@ select {
   color: var(--accent);
 }
 
-/* When on, the focus ring covers the accent border instead of drawing a second line around it. */
-.composer-toggle[aria-pressed='true']:focus-visible,
-.composer-mode-wrap[data-deep] .composer-mode:focus-visible {
+/* The focus ring sits on the button's edge (over the accent border when on), not around it. */
+.composer-toggle:focus-visible,
+.composer-mode:focus-visible {
   outline-offset: -1px;
 }
 
