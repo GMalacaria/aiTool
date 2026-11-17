@@ -128,6 +128,7 @@ const KNOWN_ERRORS = [
   'attachments_unavailable',
   'invalid_request',
   'sources_unavailable',
+  'conversation_limit_reached',
 ] as const;
 
 export type ApiErrorCode = (typeof KNOWN_ERRORS)[number];

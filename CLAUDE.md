@@ -217,7 +217,8 @@ With free tiers the blocking limit is almost always **tokens per day**, not requ
 
 - The model has no memory across conversations. The stored history is explicit and user-controllable (reopen, delete).
 - No avatar, human name, or "is typing…" indicator.
-- Periodic reminder "this is a tool, not a person" — implemented 2026-11-17 (`src/reminder.ts`): a fixed Italian note shown after the answer to every 10th question of a conversation, also when an old one is reopened. It is computed in the browser from the messages, never produced by the model and never stored. A conversation-length limit is not implemented.
+- Periodic reminder "this is a tool, not a person" — implemented 2026-11-17 (`src/reminder.ts`): a fixed Italian note shown after the answer to every 10th question of a conversation, also when an old one is reopened. It is computed in the browser from the messages, never produced by the model and never stored.
+- **Conversation length limit** (2026-11-17): at most 30 requests per chat (`shared/conversation.ts`, the third reminder). From 5 left the chat counts down ("Ancora N richieste in questa chat"); a full chat closes the composer with "Questa chat ha raggiunto il limite di 30 richieste" and a "Nuova chat" link. The server refuses more requests with `409 conversation_limit_reached` before consuming anything.
 - Honest message when the quota is used up: "Daily limit reached, come back tomorrow."
 - Sensitive-topic detection (mental health, self-harm, violence) with a fixed answer and real numbers/services.
 

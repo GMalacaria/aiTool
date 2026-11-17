@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/attachments';
 import type { ConversationMessage } from './api';
+import { MAX_QUESTIONS_PER_CONVERSATION, QUESTIONS_LEFT_WARNING } from '../shared/conversation';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
@@ -31,6 +32,8 @@ interface ChatProps {
   onSend: (content: string, attachments: Attachments, deep: boolean, verifySources: boolean) => Promise<boolean>;
   /** Checks the sources of an answer given without them; false when it could not be done. */
   onVerifySources: (messageId: number) => Promise<boolean>;
+  /** Opens a new, empty chat (used when this one is full). */
+  onNewChat: () => void;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -98,6 +101,7 @@ export function Chat({
   freeAvailable,
   onSend,
   onVerifySources,
+  onNewChat,
 }: ChatProps) {
   const [verifySources, setVerifySources] = useState(readVerifyChoice);
   const toggleVerify = () => {
@@ -123,7 +127,10 @@ export function Chat({
   }, [messages, pending]);
 
   const empty = messages.length === 0 && !pending;
-  const limitReached = remaining <= 0;
+  const questionsLeft = MAX_QUESTIONS_PER_CONVERSATION - messages.filter((message) => message.role === 'user').length;
+  const conversationFull = questionsLeft <= 0;
+  // No more requests today, or none left in this chat: the composer is closed.
+  const limitReached = remaining <= 0 || conversationFull;
   // "Ragiona" needs the paid model and an allowance left.
   const deepAvailable = deepRemaining > 0 && !freeMode;
   const deep = mode === 'deep' && deepAvailable;
@@ -191,7 +198,25 @@ export function Chat({
           {error}
         </p>
       )}
-      {limitReached && !error && <p className="composer-message muted">Limite giornaliero raggiunto, torna domani.</p>}
+      {conversationFull && (
+        <p className="notice composer-message" role="status">
+          Questa chat ha raggiunto il limite di {MAX_QUESTIONS_PER_CONVERSATION} richieste. Per continuare apri una nuova
+          chat.{' '}
+          <button type="button" className="link-button" onClick={onNewChat}>
+            Nuova chat
+          </button>
+        </p>
+      )}
+      {!conversationFull && questionsLeft <= QUESTIONS_LEFT_WARNING && !pending && (
+        <p className="composer-message muted" role="status">
+          {questionsLeft === 1
+            ? 'Ultima richiesta in questa chat.'
+            : `Ancora ${questionsLeft} richieste in questa chat.`}
+        </p>
+      )}
+      {remaining <= 0 && !conversationFull && !error && (
+        <p className="composer-message muted">Limite giornaliero raggiunto, torna domani.</p>
+      )}
       {freeMode && !limitReached && (
         <p className="notice composer-message" role="status">
           {freeAvailable
