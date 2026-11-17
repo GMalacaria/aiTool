@@ -159,6 +159,18 @@ describe('intent detection', () => {
     expect(options.fast).toBe(true);
   });
 
+  it('tells the classifier that only explicit file requests are documents', () => {
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/ONLY when the user explicitly asks for a file/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/table.*WITHOUT mention of a file/s);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/When in doubt, reply text/);
+  });
+
+  it('lets text answers use Markdown and never offers files', () => {
+    expect(SYSTEM_PROMPT).toMatch(/Markdown/);
+    expect(SYSTEM_PROMPT).toMatch(/table/);
+    expect(SYSTEM_PROMPT).toMatch(/Never offer to create a file/);
+  });
+
   it('falls back to text when the call fails', async () => {
     const { routers } = fakeRouters({ intent: new Error('down') });
     await expect(detectIntent(routers.review, [], 'Make a quiz', NO_ATTACHMENTS)).resolves.toBe('text');

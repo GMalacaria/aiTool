@@ -3,6 +3,7 @@ import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/a
 import type { ConversationMessage } from './api';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
+import { Markdown } from './Markdown';
 
 interface ChatProps {
   messages: ConversationMessage[];
@@ -93,14 +94,20 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
       <main className="chat-messages" aria-live="polite">
         {messages.length === 0 && (
           <p className="muted">
-            Scrivi una domanda. Puoi anche allegare immagini o PDF, oppure chiedere un documento, una tabella, un grafico
-            o un test da scaricare.
+            Scrivi una domanda. Puoi anche allegare immagini o PDF. Per ottenere un file da scaricare, chiedilo in modo
+            esplicito, ad esempio «fammi un PDF…» o «crea un documento Excel…».
           </p>
         )}
         {messages.map((message, index) => (
           <article key={index} className={`message message-${message.role}`}>
             <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
-            {message.document ? <DocumentView document={message.document} /> : <p>{message.content}</p>}
+            {message.document ? (
+              <DocumentView document={message.document} />
+            ) : message.role === 'assistant' ? (
+              <Markdown text={message.content} />
+            ) : (
+              <p>{message.content}</p>
+            )}
             {message.attachments && hasAttachments(message.attachments) && (
               <ul className="attachments" aria-label="Allegati">
                 {message.attachments.documents.map((name, item) => (
