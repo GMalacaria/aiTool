@@ -49,6 +49,7 @@ function RenameForm({
         value={title}
         maxLength={MAX_TITLE_CHARS}
         autoFocus
+        data-autofocus
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setTitle(event.target.value)}
       />
@@ -80,7 +81,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel, onConfirm, o
       <div className="modal-body">
         <p>{message}</p>
         <div className="modal-actions">
-          <button type="button" autoFocus onClick={onClose}>
+          <button type="button" autoFocus data-autofocus onClick={onClose}>
             Annulla
           </button>
           <button
