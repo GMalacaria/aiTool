@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useColorScheme, useSystemPrefersDark, type ColorScheme } from '../theme';
 import { ConfirmDialog } from '../ui/ConversationDialogs';
 
 interface SettingsProps {
@@ -9,10 +10,37 @@ interface SettingsProps {
 
 export function Settings({ hasConversations, onDeleteAllConversations, onDeleteAccount }: SettingsProps) {
   const [confirm, setConfirm] = useState<'history' | 'account' | null>(null);
+  const [scheme, setScheme] = useColorScheme();
+  const systemDark = useSystemPrefersDark();
+
+  const options: { value: ColorScheme; label: string }[] = [
+    { value: null, label: `Come il dispositivo (ora ${systemDark ? 'scuro' : 'chiaro'})` },
+    { value: 'light', label: 'Chiaro' },
+    { value: 'dark', label: 'Scuro' },
+  ];
 
   return (
     <main className="page-view">
       <h2>Impostazioni</h2>
+
+      <section className="settings-section" aria-labelledby="settings-look">
+        <h3 id="settings-look">Aspetto</h3>
+        <fieldset className="choice-group">
+          <legend>Tema</legend>
+          {options.map((option) => (
+            <label key={option.label} className="choice">
+              <input
+                type="radio"
+                name="color-scheme"
+                checked={scheme === option.value}
+                onChange={() => setScheme(option.value)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </fieldset>
+        <p className="muted">La scelta vale per questo dispositivo.</p>
+      </section>
 
       <section className="settings-section" aria-labelledby="settings-data">
         <h3 id="settings-data">Dati</h3>
