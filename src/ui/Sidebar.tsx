@@ -112,6 +112,9 @@ export function Sidebar({
           <ChevronIcon size={16} />
         </button>
         <div id={menuId} ref={menuRef} popover="auto" className="user-menu" aria-label="Account">
+          <button type="button" onClick={fromMenu(() => onNavigate('profile'))}>
+            Profilo
+          </button>
           <button type="button" onClick={fromMenu(() => onNavigate('settings'))}>
             Impostazioni
           </button>

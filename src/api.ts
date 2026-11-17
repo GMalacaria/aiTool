@@ -148,6 +148,22 @@ export const imageUrl = (id: string) => `/api/images/${encodeURIComponent(id)}`;
 export const SIGN_IN_URL = '/api/auth/google/start';
 
 export const fetchAccount = () => request<Account>('/me');
+export interface ProfileStats {
+  createdAt: string | null;
+  messages: number;
+  deep: number;
+  documents: number;
+  images: number;
+  tokens: number;
+  paidTokens: number;
+  freeTokens: number;
+  /** First day in the usage log; totals start there. */
+  since: string | null;
+  activeDays: number;
+  streak: { longest: number; current: number };
+}
+
+export const fetchProfileStats = () => request<ProfileStats>('/me/stats');
 export const signOut = () => request<void>('/auth/logout', 'POST');
 export const deleteAccount = () => request<void>('/me', 'DELETE');
 

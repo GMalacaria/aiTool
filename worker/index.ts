@@ -35,6 +35,7 @@ import {
 import { PROFILES, type AppEnv, type UserStatus } from './env';
 import { getRouter, hasFreeProviders } from './llm/providers';
 import { UsageMeter } from './meter';
+import { streaks, usageTotals } from './stats';
 import { AllProvidersFailedError } from './llm/router';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
 import {
@@ -153,6 +154,23 @@ app.get('/me', requireUser, async (c) => {
     tokensUsed,
     freeMode: tokensUsed >= user.dailyTokenLimit,
     freeAvailable: hasFreeProviders(c.env),
+  });
+});
+
+/** Lifetime figures for the Profile page. Counted from the usage log, which started on 2026-11-17. */
+app.get('/me/stats', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  const row = await c.env.DB.prepare('SELECT created_at AS createdAt FROM users WHERE id = ?')
+    .bind(user.id)
+    .first<{ createdAt: string }>();
+  const { days, ...totals } = await usageTotals(c.env.DB, user);
+
+  return c.json({
+    createdAt: row?.createdAt ?? null,
+    ...totals,
+    tokens: totals.paidTokens + totals.freeTokens,
+    activeDays: days.length,
+    streak: streaks(days, currentDay()),
   });
 });
 
