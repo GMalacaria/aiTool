@@ -11,7 +11,6 @@ import {
 } from './api';
 
 interface UsersProps {
-  onBack: () => void;
   onFailure: (cause: unknown) => void;
 }
 
@@ -207,7 +206,7 @@ function UserCard({ user, onChange }: { user: ManagedUser; onChange: (changes: U
   );
 }
 
-export function Users({ onBack, onFailure }: UsersProps) {
+export function Users({ onFailure }: UsersProps) {
   const [users, setUsers] = useState<ManagedUser[] | null>(null);
 
   const reload = useCallback(() => fetchUsers().then(setUsers).catch(onFailure), [onFailure]);
@@ -229,12 +228,7 @@ export function Users({ onBack, onFailure }: UsersProps) {
 
   return (
     <main className="users">
-      <div className="users-header">
-        <h2>Utenti</h2>
-        <button type="button" onClick={onBack}>
-          Torna alla chat
-        </button>
-      </div>
+      <h2>Utenti</h2>
 
       {users && (
         <p className="muted">
