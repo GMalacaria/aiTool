@@ -515,13 +515,72 @@ textarea {
   gap: 0.75rem;
 }
 
-.users-list li {
+.users-list > li {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--background);
+  overflow-wrap: anywhere;
+}
+
+/* Accordion: one closed row per person, opened to change it. */
+.user-item > summary {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 0.6rem;
+  list-style: none;
+  cursor: pointer;
+}
+
+.user-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.user-item > summary:hover {
+  background: var(--hover);
+}
+
+/* Marker right before the name, rotated when closed, drawn in the text colour. */
+.user-item > summary::before {
+  content: '';
+  flex-shrink: 0;
+  width: 0.75rem;
+  height: 0.75rem;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  rotate: -90deg;
+}
+
+.user-item[open] > summary::before {
+  rotate: 0deg;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .user-item > summary::before {
+    transition: rotate 0.15s ease;
+  }
+}
+
+.user-summary {
+  display: grid;
+  min-width: 0;
+}
+
+.user-summary-name {
+  font-weight: 600;
+}
+
+.user-summary-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.user-body {
   display: grid;
   gap: 0.75rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
-  overflow-wrap: anywhere;
+  padding: 0 0.75rem 0.75rem 2.1rem;
 }
 
 .users-actions {

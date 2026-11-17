@@ -292,7 +292,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
         <h1 className="visually-hidden">ConoscenzIA</h1>
 
         {view === 'users' && account.isAdmin ? (
-          <Users onBack={() => setView('chat')} onFailure={handleFailure} />
+          <Users onFailure={handleFailure} />
         ) : view === 'profile' ? (
           <Profile account={account} onFailure={handleFailure} />
         ) : view === 'settings' ? (
