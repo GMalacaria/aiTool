@@ -5,7 +5,7 @@ export function Login() {
 
   return (
     <main className="page">
-      <h1>ConoscenzIA</h1>
+      <h1>Kern</h1>
       <p className="muted">Uno strumento per ottenere informazioni. Non è una persona.</p>
 
       {failed && (

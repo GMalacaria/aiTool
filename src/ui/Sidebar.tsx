@@ -48,7 +48,7 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Chat e account">
       <div className="sidebar-top">
-        <span className="brand">ConoscenzIA</span>
+        <span className="brand">Kern</span>
         <button type="button" className="icon-button" aria-label="Cerca nelle chat" title="Cerca (Ctrl+K)" onClick={onSearch}>
           <SearchIcon />
         </button>

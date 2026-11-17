@@ -1,4 +1,4 @@
-# CLAUDE.md — ConoscenzIA (code name: aiTool)
+# CLAUDE.md — Kern (code name: aiTool)
 
 ## Repository rules
 
@@ -10,9 +10,9 @@
 
 ## Name
 
-- **Visible name** (UI, icon, PWA title): **ConoscenzIA**.
+- **Visible name** (UI, icon, PWA title): **Kern**.
 - **Code name** (repository, packages, variables, identifiers): **aiTool**.
-- ConoscenzIA is for family and Italian use; an international launch would need a distinctive name that is pronounceable in several languages, to be checked (domain and UIBM/EUIPO trademark) before launch. "Utilis" was discarded: already used in software.
+- Kern is for family and Italian use; an international launch would need a distinctive name that is pronounceable in several languages, to be checked (domain and UIBM/EUIPO trademark) before launch. "Utilis" was discarded: already used in software.
 
 ## Project goal
 

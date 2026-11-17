@@ -290,7 +290,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             </button>
           </div>
         )}
-        <h1 className="visually-hidden">ConoscenzIA</h1>
+        <h1 className="visually-hidden">Kern</h1>
 
         {view === 'users' && account.isAdmin ? (
           <Users onFailure={handleFailure} />
