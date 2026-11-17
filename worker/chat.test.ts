@@ -265,7 +265,10 @@ describe('image intent', () => {
 
   it('tells the classifier that only explicit picture requests are images', () => {
     expect(INTENT_SYSTEM_PROMPT).toMatch(/image: ONLY when the user explicitly asks for a picture/);
-    expect(INTENT_SYSTEM_PROMPT).toMatch(/Questions about attached images are text/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/Questions about attached images, comments and thanks about the generated image are text/);
+    // Follow-up changes count as images only after an image.
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/only when <previous_answer> is image/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/only when <previous_answer> is document/);
   });
 
   it('passes the kind of the previous answer to the classifier', async () => {
