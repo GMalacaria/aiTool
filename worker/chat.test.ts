@@ -107,16 +107,22 @@ describe('parseChatRequest', () => {
       message: 'hello',
       attachments: NO_ATTACHMENTS,
       deep: false,
+      verifySources: false,
     });
   });
 
-  it('accepts an existing conversation id and the deep flag', () => {
-    expect(parseChatRequest({ conversationId: CONVERSATION_ID, message: 'hi', deep: true })).toEqual({
+  it('accepts an existing conversation id, the deep flag and the sources flag', () => {
+    expect(parseChatRequest({ conversationId: CONVERSATION_ID, message: 'hi', deep: true, verifySources: true })).toEqual({
       conversationId: CONVERSATION_ID,
       message: 'hi',
       attachments: NO_ATTACHMENTS,
       deep: true,
+      verifySources: true,
     });
+  });
+
+  it('rejects a sources flag that is not a boolean', () => {
+    expect(parseChatRequest({ message: 'hi', verifySources: 'yes' })).toBeNull();
   });
 
   it.each([
@@ -233,6 +239,14 @@ describe('respond with text', () => {
     const review = callsWith(REVIEW_SYSTEM_PROMPT)[0][0];
     expect(review[1].content).toContain('Capital of Italy?');
     expect(review[1].content).toContain('Great question! Rome.');
+  });
+
+  it('marks a factual answer written without search as unchecked', async () => {
+    const { routers } = fakeRouters({ intent: 'search', draft: 'Rome.' });
+    await expect(respond(routers, [], 'Capital of Italy?')).resolves.toEqual({
+      text: 'Rome.',
+      sources: { items: [], verified: false, unchecked: true },
+    });
   });
 
   it('returns the draft when the review pass fails', async () => {

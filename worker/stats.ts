@@ -52,13 +52,13 @@ export async function usageTotals(db: D1Database, user: User): Promise<UsageTota
               COALESCE(SUM(paid_input_tokens + paid_output_tokens), 0) AS paidTokens,
               COALESCE(SUM(free_input_tokens + free_output_tokens), 0) AS freeTokens,
               MIN(day) AS since
-       FROM usage_events WHERE user_id = ? AND kind != 'error'`,
+       FROM usage_events WHERE user_id = ? AND kind NOT IN ('error', 'verify')`,
     )
     .bind(user.id)
     .first<Omit<UsageTotals, 'days'>>();
 
   const { results } = await db
-    .prepare(`SELECT DISTINCT day FROM usage_events WHERE user_id = ? AND kind != 'error' ORDER BY day`)
+    .prepare(`SELECT DISTINCT day FROM usage_events WHERE user_id = ? AND kind NOT IN ('error', 'verify') ORDER BY day`)
     .bind(user.id)
     .all<{ day: string }>();
 

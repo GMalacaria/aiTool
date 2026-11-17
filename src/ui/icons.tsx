@@ -78,3 +78,11 @@ export const SendIcon = (props: IconProps) => (
     <path d="M5 12h13M13 6l6 6-6 6" />
   </Svg>
 );
+
+/** A shield with a check: verified sources. */
+export const VerifiedIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 3.5 5 6.5v5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9v-5z" />
+    <path d="m9 12 2.2 2.2L15.5 10" />
+  </Svg>
+);

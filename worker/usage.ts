@@ -122,7 +122,17 @@ export async function getPaidTokens(db: D1Database, user: User, day: string): Pr
   return row?.paid_tokens ?? 0;
 }
 
-export type UsageKind = 'text' | 'deep' | 'document' | 'image' | 'error';
+/** Answers with web search today, for all users together: the app-wide cap on sources. */
+export async function getSearchesToday(db: D1Database, day: string): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS answers FROM usage_events WHERE day = ? AND searches > 0")
+    .bind(day)
+    .first<{ answers: number }>();
+  return row?.answers ?? 0;
+}
+
+/** 'verify': sources checked afterwards, on the user's request. */
+export type UsageKind = 'text' | 'deep' | 'document' | 'image' | 'error' | 'verify';
 
 /**
  * Stores what a request used: adds its paid tokens to today's budget and
@@ -148,8 +158,8 @@ export async function recordUsage(
     db
       .prepare(
         `INSERT INTO usage_events (user_id, day, kind, mode, paid_input_tokens, paid_output_tokens,
-           free_input_tokens, free_output_tokens, images, cost_micro_usd, served_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           free_input_tokens, free_output_tokens, images, cost_micro_usd, served_by, searches, sources_cost_micro_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         user.id,
@@ -163,6 +173,8 @@ export async function recordUsage(
         meter.images,
         meter.costMicroUsd,
         meter.servedBy,
+        meter.searches,
+        meter.sourcesCostMicroUsd,
       ),
   ]);
 }

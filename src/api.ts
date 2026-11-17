@@ -1,5 +1,6 @@
 import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
+import type { AnswerSources } from '../shared/sources';
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
 export type Profile = 'professional' | 'student';
@@ -28,6 +29,8 @@ export interface Account {
 }
 
 export interface ConversationMessage {
+  /** Database id of a stored message (needed to check its sources later). */
+  id?: number;
   role: 'user' | 'assistant';
   /** For document answers, the document title. */
   content: string;
@@ -38,6 +41,8 @@ export interface ConversationMessage {
   freeModel?: boolean;
   /** Names of the files attached to a question. */
   attachments?: AttachmentNames;
+  /** Verified sources: the legend for the markers in the text. */
+  sources?: AnswerSources;
 }
 
 export interface ConversationSummary {
@@ -47,6 +52,8 @@ export interface ConversationSummary {
 }
 
 export interface ChatResult {
+  /** Id of the stored answer; null when it was not stored. */
+  messageId?: number | null;
   answer: string;
   /** Absent on fixed answers, which do not touch the allowances. */
   deepRemaining?: number;
@@ -59,6 +66,8 @@ export interface ChatResult {
   image?: { id: string };
   /** Present when the answer is a document. */
   document?: DocumentSpec;
+  /** Present when the answer was written with web search. */
+  sources?: AnswerSources;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;
@@ -82,6 +91,9 @@ export interface ManagedUser {
   monthCostMicroUsd: number;
   monthRequests: number;
   monthFreeTokens: number;
+  /** Web searches this month and what searching and checking sources cost (paid by the owner). */
+  monthSearches: number;
+  monthSourcesCostMicroUsd: number;
 }
 
 export interface UsageDay {
@@ -96,6 +108,8 @@ export interface UsageDay {
   paidTokens: number;
   freeTokens: number;
   costMicroUsd: number;
+  searches: number;
+  sourcesCostMicroUsd: number;
 }
 
 export type UserChanges = Partial<Pick<ManagedUser, 'status' | 'profile' | 'dailyLimit' | 'deepLimit' | 'imageLimit' | 'tokenLimit'>>;
@@ -113,6 +127,7 @@ const KNOWN_ERRORS = [
   'service_unavailable',
   'attachments_unavailable',
   'invalid_request',
+  'sources_unavailable',
 ] as const;
 
 export type ApiErrorCode = (typeof KNOWN_ERRORS)[number];
@@ -189,7 +204,12 @@ export const sendMessage = (
   message: string,
   attachments: Attachments,
   deep: boolean,
-) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep });
+  verifySources: boolean,
+) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep, verifySources });
+
+/** Checks the sources of an answer given without them; returns the marked text and its legend. */
+export const verifyMessage = (id: number) =>
+  request<{ content: string; sources?: AnswerSources }>(`/messages/${id}/verify`, 'POST');
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
 export const fetchUserUsage = (id: number, days = 30) =>

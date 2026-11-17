@@ -27,3 +27,9 @@ ADMIN_EMAILS=you@example.com
 # Fake image model: GEMINI_IMAGE_API_KEY=any and GEMINI_IMAGE_BASE_URL=http://127.0.0.1:8788/v1beta
 # GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
 # GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token
+
+# Verified sources: factual questions are answered with OpenAI web search and
+# every sentence is checked by Gemini (the paid key above, else GEMINI_API_KEY).
+# GEMINI_VERIFY_MODEL=gemini-flash-latest
+# App-wide cap on answers with web search per day (default 300; 0 turns sources off).
+# SOURCES_DAILY_LIMIT=300

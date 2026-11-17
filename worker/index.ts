@@ -17,6 +17,7 @@ import {
 import { hasAttachments, toStored } from '../shared/attachments';
 import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
+import { parseSources } from '../shared/sources';
 import {
   generateTitle,
   MAX_HISTORY_MESSAGES,
@@ -39,16 +40,20 @@ import {
   deleteAllConversations,
   deleteConversation,
   findConversation,
+  findAnswer,
   findImage,
+  lastAnswerId,
   listConversations,
   listMessages,
   MAX_TITLE_CHARS,
   renameConversation,
+  saveCheckedAnswer,
   searchConversations,
   saveExchange,
 } from './conversations';
-import { PROFILES, type AppEnv, type UserStatus } from './env';
-import { getRouter, hasFreeProviders } from './llm/providers';
+import { PROFILES, type AppEnv, type Env, type UserStatus } from './env';
+import { getRouter, hasFreeProviders, OPENAI_MODELS, OPENAI_PRICES, type Tier } from './llm/providers';
+import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, verifyAnswer, type SourcesConfig } from './sources';
 import { UsageMeter } from './meter';
 import { streaks, usageTotals } from './stats';
 import { AllProvidersFailedError } from './llm/router';
@@ -61,6 +66,7 @@ import {
   getUsedDeepMessages,
   getUsedImages,
   getPaidTokens,
+  getSearchesToday,
   getUsedMessages,
   recordUsage,
   refundDeepMessage,
@@ -98,6 +104,34 @@ async function loadHistoryImages(bucket: R2Bucket, history: ConversationMessage[
   }
 }
 const STATUSES: UserStatus[] = ['pending', 'approved', 'blocked'];
+const DEFAULT_SOURCES_DAILY_LIMIT = 300;
+
+/**
+ * Web search with verified sources, paid by the owner. Off in free mode (the
+ * paid model is not used there) and once the app-wide daily cap is reached.
+ */
+async function sourcesConfig(env: Env, db: D1Database, day: string, tier: Tier, freeMode: boolean): Promise<SourcesConfig | undefined> {
+  if (freeMode || !env.OPENAI_API_KEY) return undefined;
+  const parsed = Number(env.SOURCES_DAILY_LIMIT);
+  const cap = env.SOURCES_DAILY_LIMIT !== undefined && Number.isFinite(parsed) ? parsed : DEFAULT_SOURCES_DAILY_LIMIT;
+  if (cap <= 0 || (await getSearchesToday(db, day)) >= cap) return undefined;
+
+  const verifyKey = env.GEMINI_IMAGE_API_KEY ?? env.GEMINI_API_KEY;
+  return {
+    openaiKey: env.OPENAI_API_KEY,
+    openaiBaseURL: (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
+    model: OPENAI_MODELS[tier],
+    price: OPENAI_PRICES[tier],
+    verify: verifyKey
+      ? {
+          apiKey: verifyKey,
+          baseURL: (env.GEMINI_IMAGE_BASE_URL ?? DEFAULT_GEMINI_BASE_URL).replace(/\/$/, ''),
+          model: env.GEMINI_VERIFY_MODEL ?? DEFAULT_VERIFY_MODEL,
+          paid: Boolean(env.GEMINI_IMAGE_API_KEY),
+        }
+      : undefined,
+  };
+}
 
 const app = new Hono<AppEnv>().basePath('/api');
 
@@ -114,11 +148,13 @@ function toClientMessage(message: ConversationMessage) {
     : undefined;
 
   const freeModel = message.freeModel ? true : undefined;
-  if (message.imageId) return { role: message.role, content: '', image: { id: message.imageId } };
+  const sources = message.sources ? (parseSources(message.sources) ?? undefined) : undefined;
+  const id = message.id;
+  if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId } };
 
   return document
-    ? { role: message.role, content: document.title, document, freeModel }
-    : { role: message.role, content: message.content, attachments, freeModel };
+    ? { id, role: message.role, content: document.title, document, freeModel }
+    : { id, role: message.role, content: message.content, attachments, freeModel, sources };
 }
 
 app.use(requireSameOrigin);
@@ -339,13 +375,17 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       ? Promise.resolve(null)
       : generateTitle(getRouter(c.env, 'standard', freeMode), request.message, meter);
 
-    const generate = (useDeep: boolean) =>
+    const generate = async (useDeep: boolean) =>
       respond(
         {
           draft: getRouter(c.env, useDeep ? 'deep' : 'standard', freeMode),
           review: getRouter(c.env, 'standard', freeMode),
           deep: useDeep,
           meter,
+          // Only when the user asked for verified sources: the search makes the answer slower.
+          sources: request.verifySources
+            ? await sourcesConfig(c.env, db, day, useDeep ? 'deep' : 'standard', freeMode)
+            : undefined,
           profile: user.profile,
           images: {
             enabled: imagesEnabled(c.env),
@@ -432,7 +472,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       const free = meter.answeredByFreeModel;
       conversation = result.document
         ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise);
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null);
     }
 
     uploadedImages = [];
@@ -440,9 +480,11 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     await saveUsage();
 
     return c.json({
+      messageId: await lastAnswerId(db, conversation.id),
       answer: result.document ? result.document.title : result.text,
       document: result.document,
       image: imageId ? { id: imageId } : undefined,
+      sources: result.text !== undefined ? (result.sources ?? undefined) : undefined,
       deep,
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),
@@ -476,6 +518,39 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
   }
 });
 
+/**
+ * Checks the sources of an answer written without search, on the user's
+ * request. Paid by the owner: it uses no allowance, only the app-wide cap.
+ */
+app.post('/messages/:id/verify', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  const answer = Number.isInteger(id) ? await findAnswer(c.env.DB, user, id) : null;
+  if (!answer) return c.json({ error: 'not_found' }, 404);
+
+  const current = answer.sources ? parseSources(answer.sources) : null;
+  // Already checked (or never factual): nothing to do, the stored answer is returned.
+  if (answer.kind !== 'text' || !current?.unchecked) {
+    return c.json({ content: answer.content, sources: current ?? undefined });
+  }
+
+  const day = currentDay();
+  const config = await sourcesConfig(c.env, c.env.DB, day, 'standard', false);
+  if (!config) return c.json({ error: 'sources_unavailable' }, 503);
+
+  const meter = new UsageMeter();
+  try {
+    const checked = await verifyAnswer(config, answer.question, answer.content, meter);
+    await saveCheckedAnswer(c.env.DB, answer.id, checked.text, checked.sources);
+    await recordUsage(c.env.DB, user, day, 'verify', 'paid', meter);
+    return c.json({ content: checked.text, sources: checked.sources ?? undefined });
+  } catch (error) {
+    console.error('source check failed', error);
+    await recordUsage(c.env.DB, user, day, 'error', 'paid', meter).catch(() => undefined);
+    return c.json({ error: 'sources_unavailable' }, 503);
+  }
+});
+
 // --- Administration ----------------------------------------------------------
 
 app.get('/admin/users', requireUser, requireAdmin, async (c) => {
@@ -489,12 +564,14 @@ app.get('/admin/users', requireUser, requireAdmin, async (c) => {
             COALESCE(d.messages, 0) AS todayMessages, COALESCE(d.paid_tokens, 0) AS todayPaidTokens,
             COALESCE(d.images, 0) AS todayImages,
             COALESCE(m.cost, 0) AS monthCostMicroUsd, COALESCE(m.requests, 0) AS monthRequests,
-            COALESCE(m.free_tokens, 0) AS monthFreeTokens
+            COALESCE(m.free_tokens, 0) AS monthFreeTokens,
+            COALESCE(m.searches, 0) AS monthSearches, COALESCE(m.sources_cost, 0) AS monthSourcesCostMicroUsd
      FROM users u
      LEFT JOIN daily_usage d ON d.user_id = u.id AND d.day = ?1
      LEFT JOIN (
        SELECT user_id, SUM(cost_micro_usd) AS cost, COUNT(*) AS requests,
-              SUM(free_input_tokens + free_output_tokens) AS free_tokens
+              SUM(free_input_tokens + free_output_tokens) AS free_tokens,
+              SUM(searches) AS searches, SUM(sources_cost_micro_usd) AS sources_cost
        FROM usage_events WHERE day >= ?2 GROUP BY user_id
      ) m ON m.user_id = u.id
      ORDER BY u.status = 'pending' DESC, u.created_at DESC`,
@@ -522,7 +599,9 @@ app.get('/admin/users/:id/usage', requireUser, requireAdmin, async (c) => {
             SUM(CASE WHEN mode = 'free' THEN 1 ELSE 0 END) AS freeModeRequests,
             SUM(paid_input_tokens + paid_output_tokens) AS paidTokens,
             SUM(free_input_tokens + free_output_tokens) AS freeTokens,
-            SUM(cost_micro_usd) AS costMicroUsd
+            SUM(cost_micro_usd) AS costMicroUsd,
+            SUM(searches) AS searches,
+            SUM(sources_cost_micro_usd) AS sourcesCostMicroUsd
      FROM usage_events WHERE user_id = ? AND day >= ?
      GROUP BY day ORDER BY day DESC`,
   )

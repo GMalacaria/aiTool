@@ -21,6 +21,13 @@ export interface Env {
   GEMINI_IMAGE_API_KEY?: string;
   GEMINI_IMAGE_MODEL?: string;
   GEMINI_IMAGE_BASE_URL?: string;
+  /**
+   * Verified sources: the model that checks each sentence against the cited
+   * pages (Gemini, with the paid key above, or the free key when there is none).
+   */
+  GEMINI_VERIFY_MODEL?: string;
+  /** App-wide cap on answers with web search per day (all users together). Default 300; 0 turns sources off. */
+  SOURCES_DAILY_LIMIT?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   /** Optional overrides, used to point Google sign-in at a local mock. */
