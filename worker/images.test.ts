@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from './env';
-import { decodeBase64, generateImage, ImageNotProducedError, imagesEnabled, isFlagged, MAX_IMAGE_BYTES } from './images';
+import { dataUrlToBytes, decodeBase64, encodeBase64, generateImage, isImageFlagged, ImageNotProducedError, imagesEnabled, isFlagged, MAX_IMAGE_BYTES } from './images';
 
 const env = (overrides: Partial<Env> = {}): Env =>
   ({ OPENAI_API_KEY: 'openai-key', GEMINI_IMAGE_API_KEY: 'image-key', ...overrides }) as Env;
@@ -89,6 +89,32 @@ describe('generateImage', () => {
 
   it('needs the image key', async () => {
     await expect(generateImage(env({ GEMINI_IMAGE_API_KEY: undefined }), 'x')).rejects.toThrow();
+  });
+});
+
+describe('image editing helpers', () => {
+  it('puts the image to edit before the instruction', async () => {
+    const fetchFn = vi.fn(async () => imageResponse(PNG_BASE64));
+    await generateImage(env(), 'make it blue', asFetch(fetchFn), { dataUrl: 'data:image/jpeg;base64,QUJD' });
+
+    const body = JSON.parse((fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.contents[0].parts).toEqual([{ inlineData: { mimeType: 'image/jpeg', data: 'QUJD' } }, { text: 'make it blue' }]);
+  });
+
+  it('moderates an image through the same endpoint', async () => {
+    const fetchFn = vi.fn(async () => Response.json({ results: [{ flagged: false }] }));
+    await expect(isImageFlagged(env(), 'data:image/jpeg;base64,QUJD', asFetch(fetchFn))).resolves.toBe(false);
+    const body = JSON.parse((fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.input).toEqual([{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } }]);
+  });
+
+  it('encodes and decodes base64 both ways', () => {
+    const bytes = new Uint8Array(Array.from({ length: 70_000 }, (_, index) => (index * 31) % 256));
+    expect([...decodeBase64(encodeBase64(bytes))]).toEqual([...bytes]);
+    expect(dataUrlToBytes(`data:image/png;base64,${encodeBase64(bytes.subarray(0, 3))}`)).toEqual({
+      bytes: bytes.subarray(0, 3),
+      mimeType: 'image/png',
+    });
   });
 });
 

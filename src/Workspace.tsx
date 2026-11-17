@@ -176,6 +176,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
         ? {
             documents: attachments.documents.map((document) => document.name),
             images: attachments.images.map((image) => image.name),
+            imageUrls: attachments.images.map((image) => image.dataUrl),
           }
         : undefined,
     };

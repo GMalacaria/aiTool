@@ -1,3 +1,4 @@
+import { splitDataUrl } from '../shared/attachments';
 import type { Env } from './env';
 
 const DEFAULT_IMAGE_MODEL = 'gemini-3.1-flash-lite-image';
@@ -46,6 +47,12 @@ export interface GeneratedImage {
   mimeType: string;
 }
 
+/** The image to edit goes first, then the instruction. */
+function sourcePart(source?: { dataUrl: string }): { inlineData: { mimeType: string; data: string } }[] {
+  const parts = source ? splitDataUrl(source.dataUrl) : null;
+  return parts ? [{ inlineData: { mimeType: parts.mimeType, data: parts.data } }] : [];
+}
+
 export class ImageNotProducedError extends Error {
   constructor(message: string) {
     super(message);
@@ -80,8 +87,61 @@ export function decodeBase64(data: string): Uint8Array {
   return bytes;
 }
 
+/** Bytes to base64, with the native encoder when the runtime has it. */
+export function encodeBase64(bytes: Uint8Array): string {
+  const native = (bytes as unknown as { toBase64?: () => string }).toBase64;
+  if (typeof native === 'function') return native.call(bytes);
+
+  let binary = '';
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mimeType: string } | null {
+  const parts = splitDataUrl(dataUrl);
+  return parts ? { bytes: decodeBase64(parts.data), mimeType: parts.mimeType } : null;
+}
+
+/** Reads a stored image back as a data URL, or null if the file is gone. */
+export async function readImage(
+  bucket: R2Bucket,
+  id: string,
+): Promise<{ dataUrl: string; mimeType: string } | null> {
+  const object = await bucket.get(id);
+  if (!object) return null;
+  const mimeType = object.httpMetadata?.contentType ?? 'image/jpeg';
+  const bytes = new Uint8Array(await object.arrayBuffer());
+  return { dataUrl: `data:${mimeType};base64,${encodeBase64(bytes)}`, mimeType };
+}
+
+/** Moderation of an image to edit; fails closed like `isFlagged`. */
+export async function isImageFlagged(
+  env: Env,
+  dataUrl: string,
+  fetchFn: typeof fetch = (input, init) => fetch(input, init),
+): Promise<boolean> {
+  if (!env.OPENAI_API_KEY) throw new Error('moderation not configured');
+
+  const baseURL = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+  const response = await fetchFn(`${baseURL}/moderations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+    body: JSON.stringify({ model: MODERATION_MODEL, input: [{ type: 'image_url', image_url: { url: dataUrl } }] }),
+    signal: AbortSignal.timeout(MODERATION_TIMEOUT_MS * 2),
+  });
+  if (!response.ok) throw new Error(`moderation answered ${response.status}`);
+
+  const data = (await response.json()) as { results?: { flagged?: unknown }[] };
+  const flagged = data.results?.[0]?.flagged;
+  if (typeof flagged !== 'boolean') throw new Error('unexpected moderation response');
+  return flagged;
+}
+
 /**
- * Generates one image from an English description with the Gemini image model.
+ * Generates one image from an English description with the Gemini image model,
+ * or edits `source` following the instruction when an image is given.
  * Throws ImageNotProducedError when the model answers without an image, e.g.
  * because its own safety filters blocked the request.
  */
@@ -89,6 +149,7 @@ export async function generateImage(
   env: Env,
   prompt: string,
   fetchFn: typeof fetch = (input, init) => fetch(input, init),
+  source?: { dataUrl: string },
 ): Promise<GeneratedImage> {
   if (!env.GEMINI_IMAGE_API_KEY) throw new Error('image generation not configured');
 
@@ -99,7 +160,7 @@ export async function generateImage(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_IMAGE_API_KEY },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts: [...sourcePart(source), { text: prompt }] }],
       generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
     }),
     signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),

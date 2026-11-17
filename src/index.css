@@ -1414,3 +1414,23 @@ select {
     display: none;
   }
 }
+
+/* Attached images shown under the user's message */
+
+.attachments .attachment-thumb {
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.attachment-thumb img {
+  display: block;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 0.6rem;
+  object-fit: cover;
+}
+
+.message-user .attachments {
+  justify-content: flex-end;
+}

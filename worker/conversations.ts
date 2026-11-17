@@ -83,6 +83,17 @@ export async function saveExchange(
             .bind(image.id, user.id, id, image.mimeType),
         ]
       : []),
+    // Attached images are kept too, so they can be shown and edited later; their files are already in R2.
+    ...(attachments?.images ?? [])
+      .filter((attached) => attached.id)
+      .map((attached) =>
+        db
+          .prepare(
+            `INSERT INTO generated_images (id, user_id, conversation_id, mime_type, source, name)
+             VALUES (?, ?, ?, ?, 'attached', ?)`,
+          )
+          .bind(attached.id ?? '', user.id, id, attached.mimeType ?? 'image/jpeg', attached.name),
+      ),
     insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0),
     insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null, freeModel ? 1 : 0),
   ]);

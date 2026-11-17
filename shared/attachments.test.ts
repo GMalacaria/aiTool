@@ -4,6 +4,7 @@ import {
   EMPTY_ATTACHMENTS,
   parseAttachments,
   parseStoredAttachments,
+  splitDataUrl,
   toStored,
 } from './attachments';
 
@@ -48,9 +49,21 @@ describe('parseAttachments', () => {
 describe('stored attachments', () => {
   it('keeps document text and only the names of images', () => {
     const stored = toStored({ documents: [{ name: 'a.pdf', text: 'Body' }], images: [{ name: 'p.jpg', dataUrl: IMAGE }] });
-    expect(stored).toEqual({ documents: [{ name: 'a.pdf', text: 'Body' }], images: ['p.jpg'] });
+    expect(stored).toEqual({ documents: [{ name: 'a.pdf', text: 'Body' }], images: [{ name: 'p.jpg' }] });
     expect(JSON.stringify(stored)).not.toContain('base64');
     expect(parseStoredAttachments(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  it('keeps the R2 id of stored images and reads older messages that stored names only', () => {
+    const stored = toStored({ documents: [], images: [{ name: 'p.jpg', dataUrl: IMAGE }] }, [{ id: 'img-1', mimeType: 'image/jpeg' }]);
+    expect(stored.images).toEqual([{ name: 'p.jpg', id: 'img-1', mimeType: 'image/jpeg' }]);
+    expect(parseStoredAttachments(JSON.stringify(stored))).toEqual(stored);
+    expect(parseStoredAttachments('{"documents":[],"images":["old.jpg"]}')).toEqual({ documents: [], images: [{ name: 'old.jpg' }] });
+  });
+
+  it('splits a data URL', () => {
+    expect(splitDataUrl('data:image/png;base64,AAAA')).toEqual({ mimeType: 'image/png', data: 'AAAA' });
+    expect(splitDataUrl('https://example.com/a.png')).toBeNull();
   });
 
   it('returns null for nothing, empty or broken data', () => {

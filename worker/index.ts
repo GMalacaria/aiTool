@@ -17,8 +17,23 @@ import {
 import { hasAttachments, toStored } from '../shared/attachments';
 import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
-import { generateTitle, MAX_HISTORY_MESSAGES, parseChatRequest, respond, type ConversationMessage } from './chat';
-import { generateImage, ImageNotProducedError, imagesEnabled, isFlagged } from './images';
+import {
+  generateTitle,
+  MAX_HISTORY_MESSAGES,
+  parseChatRequest,
+  respond,
+  type ConversationMessage,
+  type LoadedImage,
+} from './chat';
+import {
+  dataUrlToBytes,
+  generateImage,
+  ImageNotProducedError,
+  imagesEnabled,
+  isFlagged,
+  isImageFlagged,
+  readImage,
+} from './images';
 import {
   deleteAccount,
   deleteAllConversations,
@@ -54,6 +69,34 @@ import {
 } from './usage';
 
 const STATE_COOKIE = 'oauth_state';
+/** Stored images sent to the model again in a follow-up, newest first. */
+const MAX_HISTORY_IMAGES = 4;
+
+/**
+ * Loads the most recent stored images of the conversation (attached by the
+ * user or generated) so the model can look at them again and edits can start
+ * from them. Missing files are skipped.
+ */
+async function loadHistoryImages(bucket: R2Bucket, history: ConversationMessage[]): Promise<void> {
+  let budget = MAX_HISTORY_IMAGES;
+  for (const message of [...history].reverse()) {
+    if (budget <= 0) break;
+    const wanted =
+      message.role === 'assistant'
+        ? message.imageId
+          ? [{ id: message.imageId, name: 'generated image' }]
+          : []
+        : (message.attachments?.images ?? []).filter((image): image is { id: string; name: string } => Boolean(image.id));
+
+    const loaded: LoadedImage[] = [];
+    for (const image of wanted.slice(0, budget)) {
+      const data = await readImage(bucket, image.id);
+      if (data) loaded.push({ id: image.id, name: image.name, ...data });
+    }
+    if (loaded.length) message.imageData = loaded;
+    budget -= loaded.length;
+  }
+}
 const STATUSES: UserStatus[] = ['pending', 'approved', 'blocked'];
 
 const app = new Hono<AppEnv>().basePath('/api');
@@ -63,7 +106,11 @@ function toClientMessage(message: ConversationMessage) {
   const document = message.kind === 'document' ? parseDocument(message.content) : null;
   // The client only needs the names: extracted text stays on the server.
   const attachments = message.attachments
-    ? { documents: message.attachments.documents.map((entry) => entry.name), images: message.attachments.images }
+    ? {
+        documents: message.attachments.documents.map((entry) => entry.name),
+        images: message.attachments.images.map((image) => image.name),
+        imageUrls: message.attachments.images.map((image) => (image.id ? `/api/images/${image.id}` : null)),
+      }
     : undefined;
 
   const freeModel = message.freeModel ? true : undefined;
@@ -279,11 +326,13 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
   let imageTaken = false;
   let storedImageId: string | null = null;
+  // Attached images written to R2 for this request: removed again if the exchange is not saved.
+  let uploadedImages: string[] = [];
 
   try {
     const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
+    await loadHistoryImages(c.env.IMAGES, history);
     const { attachments } = request;
-    const stored = hasAttachments(attachments) ? toStored(attachments) : null;
 
     // A new conversation gets a short title, made from the question alone while the answer is written.
     const titlePromise = request.conversationId
@@ -298,7 +347,11 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           deep: useDeep,
           meter,
           profile: user.profile,
-          images: { enabled: imagesEnabled(c.env), isFlagged: (text) => isFlagged(c.env, text) },
+          images: {
+            enabled: imagesEnabled(c.env),
+            isFlagged: (text) => isFlagged(c.env, text),
+            isImageFlagged: (dataUrl) => isImageFlagged(c.env, dataUrl),
+          },
         },
         history,
         request.message,
@@ -326,6 +379,18 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     let conversation;
     let imageId: string | null = null;
 
+    // The attached images are kept, so they can be shown and edited later without attaching them again.
+    const files: { id: string; mimeType: string }[] = [];
+    for (const image of attachments.images) {
+      const decoded = dataUrlToBytes(image.dataUrl);
+      if (!decoded) continue;
+      const id = crypto.randomUUID();
+      await c.env.IMAGES.put(id, decoded.bytes, { httpMetadata: { contentType: decoded.mimeType } });
+      uploadedImages.push(id);
+      files.push({ id, mimeType: decoded.mimeType });
+    }
+    const stored = hasAttachments(attachments) ? toStored(attachments, files) : null;
+
     if (result.image) {
       if ((await consumeImage(db, user, day)) === null) {
         await refundMessage(db, user, day);
@@ -334,7 +399,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       imageTaken = true;
 
       try {
-        const generated = await generateImage(c.env, result.image.prompt);
+        const generated = await generateImage(c.env, result.image.prompt, undefined, result.image.source);
         meter.addImage();
         imageId = crypto.randomUUID();
         storedImageId = imageId;
@@ -344,7 +409,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           user,
           request.conversationId,
           request.message,
-          imageMessageContent(result.image.prompt),
+          imageMessageContent(result.image.prompt, result.image.source?.label),
           'text',
           stored,
           { id: imageId, mimeType: generated.mimeType },
@@ -370,6 +435,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
         : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise);
     }
 
+    uploadedImages = [];
     usageKind = imageId ? 'image' : result.document ? 'document' : deep ? 'deep' : 'text';
     await saveUsage();
 
@@ -397,6 +463,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     if (imageTaken) await refundImage(db, user, day);
     // The picture was stored but the exchange was not: do not leave the file behind.
     if (storedImageId) await c.env.IMAGES.delete(storedImageId).catch(() => undefined);
+    if (uploadedImages.length) await c.env.IMAGES.delete(uploadedImages).catch(() => undefined);
     // Only a provider that may not see attachments was left: say so, the user can retry without files.
     if (error instanceof AllProvidersFailedError && error.attachmentsSkipped) {
       return c.json({ error: 'attachments_unavailable' }, 503);
