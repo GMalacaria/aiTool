@@ -6,7 +6,7 @@ import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
-import { PlusIcon, SendIcon } from './ui/icons';
+import { CloseIcon, PlusIcon, SendIcon } from './ui/icons';
 import { RotatingText } from './ui/RotatingText';
 
 interface ChatProps {
@@ -177,18 +177,34 @@ export function Chat({
           <ul className="attachments attachments-pending" aria-label="Allegati da inviare">
             {attachments.documents.map((document, index) => (
               <li key={`document-${index}`}>
-                <span>{document.name}</span>
-                <button type="button" aria-label={`Rimuovi ${document.name}`} onClick={() => removeDocument(index)}>
-                  Rimuovi
+                <span className="attachment-name" title={document.name}>
+                  {document.name}
+                </span>
+                <button
+                  type="button"
+                  className="icon-button attachment-remove"
+                  aria-label={`Rimuovi ${document.name}`}
+                  title="Rimuovi"
+                  onClick={() => removeDocument(index)}
+                >
+                  <CloseIcon size={14} />
                 </button>
               </li>
             ))}
             {attachments.images.map((image, index) => (
               <li key={`image-${index}`}>
                 <img src={image.dataUrl} alt="" />
-                <span>{image.name}</span>
-                <button type="button" aria-label={`Rimuovi ${image.name}`} onClick={() => removeImage(index)}>
-                  Rimuovi
+                <span className="attachment-name" title={image.name}>
+                  {image.name}
+                </span>
+                <button
+                  type="button"
+                  className="icon-button attachment-remove"
+                  aria-label={`Rimuovi ${image.name}`}
+                  title="Rimuovi"
+                  onClick={() => removeImage(index)}
+                >
+                  <CloseIcon size={14} />
                 </button>
               </li>
             ))}
@@ -305,10 +321,18 @@ export function Chat({
                 {message.attachments && hasAttachments(message.attachments) && (
                   <ul className="attachments" aria-label="Allegati">
                     {message.attachments.documents.map((name, item) => (
-                      <li key={`document-${item}`}>Documento: {name}</li>
+                      <li key={`document-${item}`}>
+                        <span className="attachment-name" title={name}>
+                          Documento: {name}
+                        </span>
+                      </li>
                     ))}
                     {message.attachments.images.map((name, item) => (
-                      <li key={`image-${item}`}>Immagine: {name}</li>
+                      <li key={`image-${item}`}>
+                        <span className="attachment-name" title={name}>
+                          Immagine: {name}
+                        </span>
+                      </li>
                     ))}
                   </ul>
                 )}

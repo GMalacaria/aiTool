@@ -693,11 +693,28 @@ textarea {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  min-width: 0;
   max-width: 100%;
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
-  overflow-wrap: anywhere;
+}
+
+/* File names stay on one line and are cut with an ellipsis; the full name is in the title. */
+.attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachments img,
+.attachments button {
+  flex-shrink: 0;
+}
+
+.attachments-pending li {
+  max-width: min(100%, 18rem);
 }
 
 .attachments-pending {
@@ -711,9 +728,9 @@ textarea {
   object-fit: cover;
 }
 
-.attachments-pending button {
-  padding: 0.15rem 0.5rem;
-  font-size: 0.8rem;
+.attachment-remove {
+  width: 1.6rem;
+  height: 1.6rem;
 }
 
 /* Markdown in answers */
@@ -1201,6 +1218,7 @@ select {
 
 .composer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
   width: 100%;
   max-width: 48rem;
@@ -1209,10 +1227,14 @@ select {
 
 .composer-message {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .composer-box {
   display: grid;
+  /* One column that never grows past the box: long attachment names wrap or cut instead. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.4rem;
   padding: 0.4rem;
   border: 1px solid var(--border);
