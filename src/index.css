@@ -1520,6 +1520,11 @@ select {
   cursor: pointer;
 }
 
+/* The light bulb replaces the text only on narrow windows. */
+.composer-mode-icon {
+  display: none;
+}
+
 .composer-mode:disabled {
   cursor: not-allowed;
 }
@@ -1554,6 +1559,57 @@ select {
 
   .composer-row:has(.composer-mode-wrap) .send-button {
     margin-left: auto;
+  }
+
+  /* Icons only: the labels stay for screen readers. */
+  .composer-toggle {
+    position: relative;
+    justify-content: center;
+    width: 2.4rem;
+    padding: 0;
+  }
+
+  .composer-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The native select stays (and opens the system picker) but shows only the light bulb. */
+  .composer-mode-icon {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  .composer-mode-wrap::after {
+    display: none;
+  }
+
+  .composer-mode {
+    width: 2.4rem;
+    padding: 0;
+    border: 1px solid transparent;
+    color: transparent;
+  }
+
+  .composer-mode option {
+    color: var(--text);
+  }
+
+  .composer-mode-wrap[data-deep] .composer-mode {
+    border-color: var(--accent);
+    background: var(--selected);
+  }
+
+  .composer-mode-wrap[data-deep] .composer-mode-icon {
+    color: var(--accent);
   }
 }
 
