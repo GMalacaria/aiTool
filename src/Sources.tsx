@@ -154,7 +154,7 @@ export function UncheckedNotice({ onVerify }: { onVerify?: () => Promise<boolean
   return (
     <section className="source-legend source-unchecked" aria-label="Fonti">
       {state === 'checking' ? (
-        <p role="status">
+        <p role="status" className="loading">
           Verifica delle fonti in corso
           <span className="loading-dots" aria-hidden="true">
             <span />
