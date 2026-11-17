@@ -53,10 +53,30 @@ export class ImageNotProducedError extends Error {
   }
 }
 
-function decodeBase64(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+/**
+ * Base64 to bytes. Pictures are about a megabyte, and a Worker has a small CPU
+ * budget, so the native decoder is used when the runtime has it; the fallback
+ * works in chunks to avoid one huge intermediate string.
+ */
+export function decodeBase64(data: string): Uint8Array {
+  const native = (Uint8Array as unknown as { fromBase64?: (value: string) => Uint8Array }).fromBase64;
+  if (typeof native === 'function') return native.call(Uint8Array, data);
+
+  const chunks: Uint8Array[] = [];
+  const chunkChars = 4 * 16384;
+  for (let start = 0; start < data.length; start += chunkChars) {
+    const binary = atob(data.slice(start, start + chunkChars));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    chunks.push(bytes);
+  }
+
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
   return bytes;
 }
 

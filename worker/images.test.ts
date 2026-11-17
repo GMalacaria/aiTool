@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from './env';
-import { generateImage, ImageNotProducedError, imagesEnabled, isFlagged, MAX_IMAGE_BYTES } from './images';
+import { decodeBase64, generateImage, ImageNotProducedError, imagesEnabled, isFlagged, MAX_IMAGE_BYTES } from './images';
 
 const env = (overrides: Partial<Env> = {}): Env =>
   ({ OPENAI_API_KEY: 'openai-key', GEMINI_IMAGE_API_KEY: 'image-key', ...overrides }) as Env;
@@ -89,5 +89,27 @@ describe('generateImage', () => {
 
   it('needs the image key', async () => {
     await expect(generateImage(env({ GEMINI_IMAGE_API_KEY: undefined }), 'x')).rejects.toThrow();
+  });
+});
+
+describe('decodeBase64', () => {
+  const original = Array.from({ length: 200_000 }, (_, index) => (index * 7) % 256);
+  const encoded = btoa(String.fromCharCode(...original.slice(0, 50_000))) + '';
+  const sample = new Uint8Array(original.slice(0, 50_000));
+
+  it('decodes with the native decoder when the runtime has it', () => {
+    expect([...decodeBase64(encoded)]).toEqual([...sample]);
+  });
+
+  it('decodes with the chunked fallback when it does not', () => {
+    const constructor = Uint8Array as unknown as { fromBase64?: unknown };
+    const native = constructor.fromBase64;
+    constructor.fromBase64 = undefined;
+    try {
+      expect([...decodeBase64(encoded)]).toEqual([...sample]);
+      expect(decodeBase64('').length).toBe(0);
+    } finally {
+      constructor.fromBase64 = native;
+    }
   });
 });
