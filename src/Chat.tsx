@@ -5,6 +5,7 @@ import { MAX_QUESTIONS_PER_CONVERSATION, QUESTIONS_LEFT_WARNING } from '../share
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
+import { ContextNote } from './ContextNote';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
 import { CloseIcon, PlusIcon, ReasonIcon, SendIcon, VerifiedIcon } from './ui/icons';
@@ -34,6 +35,8 @@ interface ChatProps {
   onVerifySources: (messageId: number) => Promise<boolean>;
   /** Opens a new, empty chat (used when this one is full). */
   onNewChat: () => void;
+  /** Takes back the context change made with an answer. */
+  onUndoContext: (messageId: number) => Promise<'done' | 'changed' | 'failed'>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -102,6 +105,7 @@ export function Chat({
   onSend,
   onVerifySources,
   onNewChat,
+  onUndoContext,
 }: ChatProps) {
   const [verifySources, setVerifySources] = useState(readVerifyChoice);
   const toggleVerify = () => {
@@ -398,6 +402,12 @@ export function Chat({
                   />
                 ) : (
                   <p>{message.content}</p>
+                )}
+                {message.role === 'assistant' && message.contextUpdate && (
+                  <ContextNote
+                    update={message.contextUpdate}
+                    onUndo={message.id !== undefined ? () => onUndoContext(message.id as number) : undefined}
+                  />
                 )}
                 {message.role === 'assistant' && message.freeModel && (
                   <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>

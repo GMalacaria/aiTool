@@ -1850,3 +1850,72 @@ select {
     display: inline-grid;
   }
 }
+
+/* User context: note under an answer, and the section in Profilo. */
+.context-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.context-pause {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0.5rem 0 0.75rem;
+  text-align: start;
+}
+
+.context-pause input {
+  flex: none;
+  width: auto;
+  margin: 0;
+}
+
+.context-text {
+  width: 100%;
+  min-height: 7rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.context-history {
+  margin-top: 1rem;
+}
+
+.context-history ol {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-history li + li {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.context-version-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.context-version-text {
+  margin: 0.35rem 0 0;
+  font: inherit;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

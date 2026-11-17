@@ -1,6 +1,7 @@
 import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
 import type { AnswerSources } from '../shared/sources';
+import type { ContextSource, ContextUpdate } from '../shared/context';
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
 export type Profile = 'professional' | 'student';
@@ -43,6 +44,8 @@ export interface ConversationMessage {
   attachments?: AttachmentNames;
   /** Verified sources: the legend for the markers in the text. */
   sources?: AnswerSources;
+  /** The change to the user's context made with this answer. */
+  contextUpdate?: ContextUpdate;
 }
 
 export interface ConversationSummary {
@@ -68,6 +71,8 @@ export interface ChatResult {
   document?: DocumentSpec;
   /** Present when the answer was written with web search. */
   sources?: AnswerSources;
+  /** Present when the user's context was changed with this answer. */
+  contextUpdate?: ContextUpdate;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;
@@ -129,6 +134,7 @@ const KNOWN_ERRORS = [
   'invalid_request',
   'sources_unavailable',
   'conversation_limit_reached',
+  'context_changed',
 ] as const;
 
 export type ApiErrorCode = (typeof KNOWN_ERRORS)[number];
@@ -207,6 +213,31 @@ export const sendMessage = (
   deep: boolean,
   verifySources: boolean,
 ) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep, verifySources });
+
+export interface ContextVersion {
+  id: number;
+  content: string;
+  source: ContextSource;
+  note: string;
+  createdAt: string;
+}
+
+export interface UserContextData {
+  content: string;
+  paused: boolean;
+  updatedAt: string | null;
+  versions: ContextVersion[];
+}
+
+export const fetchUserContext = () => request<UserContextData>('/me/context');
+export const saveUserContext = (content: string) =>
+  request<{ content: string }>('/me/context', 'PUT', { content }).then((body) => body.content);
+export const pauseUserContext = (paused: boolean) => request<{ paused: boolean }>('/me/context', 'PATCH', { paused });
+export const restoreContextVersion = (id: number) =>
+  request<{ content: string }>(`/me/context/versions/${id}/restore`, 'POST').then((body) => body.content);
+/** Takes back the context change made with an answer. */
+export const undoContextUpdate = (messageId: number) =>
+  request<{ contextUpdate: ContextUpdate }>(`/messages/${messageId}/context-undo`, 'POST').then((body) => body.contextUpdate);
 
 /** Checks the sources of an answer given without them; returns the marked text and its legend. */
 export const verifyMessage = (id: number) =>

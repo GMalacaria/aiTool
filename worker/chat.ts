@@ -8,6 +8,8 @@ import {
 } from '../shared/attachments';
 import { parseDocument, type DocumentSpec } from '../shared/document';
 import { stripMarkers, UNCHECKED_SOURCES, type AnswerSources } from '../shared/sources';
+import type { ContextSource, ContextUpdate } from '../shared/context';
+import { proposeContext } from './context';
 import type { ChatMessage, ContentPart, ProviderRouter } from './llm/router';
 import {
   applyReview,
@@ -30,6 +32,8 @@ import {
   SYSTEM_PROMPT,
   TITLE_SYSTEM_PROMPT,
   cleanTitle,
+  contextInstruction,
+  parseRemember,
 } from './prompts';
 import type { Profile } from './env';
 import type { UsageMeter } from './meter';
@@ -65,6 +69,8 @@ export interface ConversationMessage {
   freeModel?: number;
   /** Verified sources of the answer, as stored JSON. */
   sources?: string | null;
+  /** The context change made with this answer, as stored JSON. */
+  contextUpdate?: string | null;
   /**
    * Images of this message loaded from storage for the model: the user's
    * attached images, or the image generated as this answer.
@@ -261,6 +267,15 @@ export interface Routers {
    * absent means factual questions are answered without them.
    */
   sources?: SourcesConfig;
+  /**
+   * The user's context: facts they chose to share. Absent in free mode (free
+   * providers never receive personal data). `save` stores a new version.
+   */
+  context?: {
+    content: string;
+    paused: boolean;
+    save: (content: string, source: ContextSource, note: string) => Promise<number>;
+  };
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
     enabled: boolean;
@@ -272,13 +287,19 @@ export interface Routers {
 }
 
 export type Reply =
-  | { text: string; sources?: AnswerSources | null; document?: undefined; image?: undefined }
-  | { document: DocumentSpec; text?: undefined; image?: undefined; sources?: undefined }
+  | { text: string; sources?: AnswerSources | null; document?: undefined; image?: undefined; contextUpdate?: ContextUpdate }
+  | { document: DocumentSpec; text?: undefined; image?: undefined; sources?: undefined; contextUpdate?: ContextUpdate }
   /**
    * An allowed image request: the English description for a new picture, or the
    * edit instruction together with the image to edit.
    */
-  | { image: { prompt: string; source?: SourceImage }; text?: undefined; document?: undefined; sources?: undefined };
+  | {
+      image: { prompt: string; source?: SourceImage };
+      text?: undefined;
+      document?: undefined;
+      sources?: undefined;
+      contextUpdate?: ContextUpdate;
+    };
 
 export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
 export const IMAGE_NO_SOURCE_TEXT =
@@ -302,6 +323,17 @@ export async function detectIntent(
   attachments: Attachments,
   meter?: UsageMeter,
 ): Promise<Intent> {
+  return (await classify(router, history, question, attachments, meter)).intent;
+}
+
+/** The kind of answer wanted, and whether the message states a lasting fact about the user. */
+async function classify(
+  router: ProviderRouter,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+  meter?: UsageMeter,
+): Promise<{ intent: Intent; remember: boolean }> {
   try {
     const reply = await router.complete(
       [
@@ -313,10 +345,50 @@ export async function detectIntent(
       ],
       { maxOutputTokens: MAX_INTENT_OUTPUT_TOKENS, fast: true, timeoutMs: INTENT_TIMEOUT_MS, meter, purpose: 'intent' },
     );
-    return parseIntent(reply);
+    return { intent: parseIntent(reply), remember: parseRemember(reply) };
   } catch (error) {
     console.warn('intent detection failed', error);
-    return 'text';
+    return { intent: 'text', remember: false };
+  }
+}
+
+/** The context to add to answer prompts: none when absent, empty or paused. */
+function activeContext(routers: Routers): string | undefined {
+  const context = routers.context;
+  return context && !context.paused && context.content ? context.content : undefined;
+}
+
+export const CONTEXT_UNAVAILABLE_TEXT = 'Il contesto non è disponibile in questo momento.';
+export const CONTEXT_PAUSED_TEXT = 'Il tuo contesto è in pausa: riattivalo dal Profilo per aggiornarlo.';
+
+/** An explicit request about the context ("ricorda che…", "cosa sai di me?"). */
+async function answerAboutContext(routers: Routers, question: string): Promise<Reply> {
+  const context = routers.context;
+  if (!context) return { text: CONTEXT_UNAVAILABLE_TEXT };
+  if (context.paused) return { text: CONTEXT_PAUSED_TEXT };
+  try {
+    const proposal = await proposeContext(routers.review, context.content, question, 'request', routers.meter);
+    if (!proposal.change) return { text: proposal.reply || 'Nessuna modifica al contesto.' };
+    const versionId = await context.save(proposal.content, 'request', proposal.change);
+    return { text: proposal.reply || proposal.change, contextUpdate: { versionId, change: proposal.change } };
+  } catch (error) {
+    console.warn('context request failed', error);
+    return { text: CONTEXT_UNAVAILABLE_TEXT };
+  }
+}
+
+/** A lasting fact noticed in an ordinary message: stored, and shown with "Annulla". Never fails the answer. */
+async function updateContextQuietly(routers: Routers, question: string): Promise<ContextUpdate | undefined> {
+  const context = routers.context;
+  if (!context || context.paused) return undefined;
+  try {
+    const proposal = await proposeContext(routers.review, context.content, question, 'auto', routers.meter);
+    if (!proposal.change) return undefined;
+    const versionId = await context.save(proposal.content, 'auto', proposal.change);
+    return { versionId, change: proposal.change };
+  } catch (error) {
+    console.warn('context not updated', error);
+    return undefined;
   }
 }
 
@@ -335,16 +407,41 @@ export async function respond(
   question: string,
   attachments: Attachments = { documents: [], images: [] },
 ): Promise<Reply> {
-  const intent = detectIntent(routers.review, history, question, attachments, routers.meter);
+  const classified = classify(routers.review, history, question, attachments, routers.meter);
 
   const speculativeDraft = routers.deep ? null : draftText(routers, history, question, attachments);
   // A failure is reported only if this draft ends up being used.
   speculativeDraft?.catch(() => undefined);
 
-  const detected = await intent;
+  const { intent: detected, remember } = await classified;
+  if (detected === 'context') return answerAboutContext(routers, question);
+
+  // The context is updated while the answer is written.
+  const contextUpdate = remember ? updateContextQuietly(routers, question) : Promise.resolve(undefined);
+  const reply = await answerFor(detected, routers, history, question, attachments, speculativeDraft);
+  const update = await contextUpdate;
+  return update ? { ...reply, contextUpdate: update } : reply;
+}
+
+async function answerFor(
+  detected: Exclude<Intent, 'context'>,
+  routers: Routers,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+  speculativeDraft: Promise<string> | null,
+): Promise<Reply> {
   if (detected === 'document') {
     return {
-      document: await createDocument(routers.draft, history, question, attachments, routers.meter, routers.profile),
+      document: await createDocument(
+        routers.draft,
+        history,
+        question,
+        attachments,
+        routers.meter,
+        routers.profile,
+        activeContext(routers),
+      ),
     };
   }
   if (detected === 'image') return planImage(routers, history, question, attachments);
@@ -426,11 +523,13 @@ async function searchText(
   question: string,
   attachments: Attachments,
 ): Promise<Reply> {
+  const context = activeContext(routers);
   const systemPrompt = [
     SYSTEM_PROMPT,
     SEARCH_INSTRUCTION,
     ...(routers.deep ? [DEEP_INSTRUCTION] : []),
     ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
+    ...(context ? [contextInstruction(context)] : []),
   ].join('\n');
   const result = await answerWithSources(config, buildMessages(systemPrompt, history, question, attachments, 'text'), {
     deep: routers.deep,
@@ -449,10 +548,12 @@ function draftText(
   question: string,
   attachments: Attachments,
 ): Promise<string> {
+  const context = activeContext(routers);
   const systemPrompt = [
     SYSTEM_PROMPT,
     ...(routers.deep ? [DEEP_INSTRUCTION] : []),
     ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
+    ...(context ? [contextInstruction(context)] : []),
   ].join('\n');
   return routers.draft.complete(buildMessages(systemPrompt, history, question, attachments, 'text'), {
     meter: routers.meter,
@@ -479,7 +580,14 @@ async function reviewText(
           content:
             routers.profile === 'student' ? `${REVIEW_SYSTEM_PROMPT}\n${STUDENT_REVIEW_INSTRUCTION}` : REVIEW_SYSTEM_PROMPT,
         },
-        { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments, history), draft) },
+        {
+          role: 'user',
+          content: buildReviewInput(
+            reviewQuestion(question, attachments, history) +
+              (activeContext(routers) ? '\n\n[The writer also knew facts the user chose to share about themselves (job, school, preferences): do not remove tailoring based on them.]' : ''),
+            draft,
+          ),
+        },
       ],
       {
         maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
@@ -506,9 +614,14 @@ export async function createDocument(
   attachments: Attachments = { documents: [], images: [] },
   meter?: UsageMeter,
   profile?: Profile,
+  /** Facts the user shared about themselves. */
+  userContext?: string,
 ): Promise<DocumentSpec> {
-  const systemPrompt =
-    profile === 'student' ? `${DOCUMENT_SYSTEM_PROMPT}\n${STUDENT_DOCUMENT_INSTRUCTION}` : DOCUMENT_SYSTEM_PROMPT;
+  const systemPrompt = [
+    DOCUMENT_SYSTEM_PROMPT,
+    ...(profile === 'student' ? [STUDENT_DOCUMENT_INSTRUCTION] : []),
+    ...(userContext ? [contextInstruction(userContext)] : []),
+  ].join('\n');
   const raw = await router.complete(buildMessages(systemPrompt, history, question, attachments, 'document'), {
     meter,
     purpose: 'document',

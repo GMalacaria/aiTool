@@ -2,7 +2,7 @@
  * Collects what one chat request used: tokens per model call (paid or free),
  * images and the estimated cost. Nothing about the content is kept.
  */
-export type CallPurpose = 'intent' | 'draft' | 'review' | 'document' | 'plan' | 'title' | 'search' | 'verify';
+export type CallPurpose = 'intent' | 'draft' | 'review' | 'document' | 'plan' | 'title' | 'search' | 'verify' | 'context';
 
 /** Web search and source checking: paid by the owner, never counted against the user's token budget. */
 const SOURCE_PURPOSES: CallPurpose[] = ['search', 'verify'];

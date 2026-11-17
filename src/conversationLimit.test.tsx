@@ -30,6 +30,7 @@ const render = (messages: ConversationMessage[]) =>
       onSend={async () => true}
       onVerifySources={async () => true}
       onNewChat={() => undefined}
+      onUndoContext={async () => 'done' as const}
     />,
   );
 

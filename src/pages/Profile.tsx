@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchAccount, fetchProfileStats, type Account, type ProfileStats } from '../api';
 import { PROFILE_LABEL } from '../ui/Sidebar';
+import { ContextSection } from './ContextSection';
 
 interface ProfileProps {
   account: Account;
@@ -68,6 +69,8 @@ export function Profile({ account, onFailure }: ProfileProps) {
           </div>
         </dl>
       </section>
+
+      <ContextSection onFailure={onFailure} />
 
       <section className="settings-section" aria-labelledby="profile-today">
         <h3 id="profile-today">Disponibili oggi</h3>
