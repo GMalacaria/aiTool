@@ -863,6 +863,21 @@ textarea {
   font-size: 0.875rem;
 }
 
+.source-unchecked p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .markdown .source-legend h3 {
   margin: 0 0 0.3rem;
   font-size: 0.875rem;
@@ -1421,6 +1436,41 @@ select {
 
 .composer-input:focus-visible {
   outline: none;
+}
+
+/* "Fonti": verified sources on request. Same height as the select. */
+.composer-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.4rem;
+  padding: 0 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.composer-toggle:hover {
+  color: var(--text);
+}
+
+.composer-toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--selected);
+  color: var(--accent);
+}
+
+.composer-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.composer-verify-note {
+  color: var(--accent);
 }
 
 .composer-mode-wrap {

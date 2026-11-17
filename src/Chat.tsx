@@ -6,7 +6,7 @@ import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
-import { CloseIcon, PlusIcon, SendIcon } from './ui/icons';
+import { CloseIcon, PlusIcon, SendIcon, VerifiedIcon } from './ui/icons';
 import { RotatingText } from './ui/RotatingText';
 
 interface ChatProps {
@@ -28,7 +28,9 @@ interface ChatProps {
   freeMode: boolean;
   freeAvailable: boolean;
   /** Resolves to false when the message was not sent. */
-  onSend: (content: string, attachments: Attachments, deep: boolean) => Promise<boolean>;
+  onSend: (content: string, attachments: Attachments, deep: boolean, verifySources: boolean) => Promise<boolean>;
+  /** Checks the sources of an answer given without them; false when it could not be done. */
+  onVerifySources: (messageId: number) => Promise<boolean>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -45,6 +47,17 @@ const LOADING = [
 ] as const;
 
 type AnswerMode = 'normal' | 'deep';
+
+/** The "Fonti" choice is remembered on this device. */
+const VERIFY_KEY = 'verify-sources';
+
+function readVerifyChoice(): boolean {
+  try {
+    return localStorage.getItem(VERIFY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function Loading() {
   return (
@@ -75,7 +88,18 @@ export function Chat({
   freeMode,
   freeAvailable,
   onSend,
+  onVerifySources,
 }: ChatProps) {
+  const [verifySources, setVerifySources] = useState(readVerifyChoice);
+  const toggleVerify = () => {
+    const next = !verifySources;
+    setVerifySources(next);
+    try {
+      localStorage.setItem(VERIFY_KEY, next ? '1' : '0');
+    } catch {
+      // Not remembered on this device: the choice still applies now.
+    }
+  };
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<Attachments>(EMPTY_ATTACHMENTS);
   const [notes, setNotes] = useState<string[]>([]);
@@ -108,7 +132,7 @@ export function Chat({
     // "Ragiona" applies to one message: it has to be chosen each time.
     setMode('normal');
     // Give the unsent message and its attachments back so they are not lost.
-    if (!(await onSend(content, sent, deep))) {
+    if (!(await onSend(content, sent, deep, verifySources))) {
       setDraft(content);
       setAttachments(sent);
     }
@@ -253,6 +277,18 @@ export function Chat({
             autoFocus
           />
 
+          <button
+            type="button"
+            className="composer-toggle"
+            aria-pressed={verifySources}
+            aria-describedby="verify-hint"
+            onClick={toggleVerify}
+            disabled={limitReached}
+          >
+            <VerifiedIcon size={16} />
+            <span>Fonti</span>
+          </button>
+
           <label htmlFor="answer-mode" className="visually-hidden">
             Tipo di risposta
           </label>
@@ -278,6 +314,11 @@ export function Chat({
         </div>
       </div>
 
+      <p id="verify-hint" className={verifySources ? 'composer-footnote composer-verify-note' : 'visually-hidden'}>
+        {verifySources
+          ? 'Verifica delle fonti attiva: le risposte sui fatti sono più lente (circa 10–20 secondi).'
+          : 'Verifica delle fonti sul web: risposte più lente.'}
+      </p>
       <p className="composer-footnote muted">
         Messaggi oggi: {remaining}/{dailyLimit}
         {imagesEnabled && imageLimit > 0 && ` · Immagini: ${imageRemaining}/${imageLimit}`}
@@ -311,7 +352,11 @@ export function Chat({
                 ) : message.image ? (
                   <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
                 ) : message.role === 'assistant' ? (
-                  <Markdown text={message.content} sources={message.sources} />
+                  <Markdown
+                    text={message.content}
+                    sources={message.sources}
+                    onVerify={message.id !== undefined ? () => onVerifySources(message.id as number) : undefined}
+                  />
                 ) : (
                   <p>{message.content}</p>
                 )}

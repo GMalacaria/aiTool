@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseMarkerHref, type AnswerSources } from '../shared/sources';
-import { MarkerView, SourceLegend } from './Sources';
+import { MarkerView, SourceLegend, UncheckedNotice } from './Sources';
 
 /**
  * Renders the model's Markdown. It is built as React elements, never as an HTML
@@ -36,7 +36,16 @@ const components: Components = {
  * markers (see shared/sources.ts): they become citation links and toggletips,
  * and the legend of the sources follows the text.
  */
-export function Markdown({ text, sources }: { text: string; sources?: AnswerSources }) {
+export function Markdown({
+  text,
+  sources,
+  onVerify,
+}: {
+  text: string;
+  sources?: AnswerSources;
+  /** Checks the sources of an unchecked answer; false when it failed. */
+  onVerify?: () => Promise<boolean>;
+}) {
   const withMarkers = useMemo<Components>(
     () => ({
       ...components,
@@ -62,7 +71,11 @@ export function Markdown({ text, sources }: { text: string; sources?: AnswerSour
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={withMarkers}>
         {text}
       </ReactMarkdown>
-      {sources && <SourceLegend sources={sources} unreadable={unreadable} />}
+      {sources?.unchecked ? (
+        <UncheckedNotice onVerify={onVerify} />
+      ) : (
+        sources && <SourceLegend sources={sources} unreadable={unreadable} />
+      )}
     </div>
   );
 }

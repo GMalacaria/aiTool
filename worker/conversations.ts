@@ -39,10 +39,10 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content, kind, attachments, imageId, freeModel, sources FROM (
+            `SELECT id, role, content, kind, attachments, imageId, freeModel, sources FROM (
                SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
@@ -104,6 +104,47 @@ export async function saveExchange(
   const conversation = await findConversation(db, user, id);
   if (!conversation) throw new Error('conversation not found after save');
   return conversation;
+}
+
+/** Id of the latest answer in a conversation: the client needs it to ask for a source check. */
+export async function lastAnswerId(db: D1Database, conversationId: string): Promise<number | null> {
+  const row = await db
+    .prepare("SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1")
+    .bind(conversationId)
+    .first<{ id: number }>();
+  return row?.id ?? null;
+}
+
+export interface AnswerToCheck {
+  id: number;
+  content: string;
+  kind: MessageKind;
+  sources: string | null;
+  /** The question the answer replied to. */
+  question: string;
+}
+
+/** An answer of the user's, with its question; null when it is not theirs. */
+export async function findAnswer(db: D1Database, user: User, id: number): Promise<AnswerToCheck | null> {
+  return db
+    .prepare(
+      `SELECT m.id, m.content, m.kind, m.sources,
+              COALESCE((SELECT q.content FROM messages q
+                        WHERE q.conversation_id = m.conversation_id AND q.role = 'user' AND q.id < m.id
+                        ORDER BY q.id DESC LIMIT 1), '') AS question
+       FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = ? AND m.role = 'assistant' AND c.user_id = ?`,
+    )
+    .bind(id, user.id)
+    .first<AnswerToCheck>();
+}
+
+/** Stores the checked answer: the text with markers and its sources. */
+export async function saveCheckedAnswer(db: D1Database, id: number, content: string, sources: AnswerSources | null): Promise<void> {
+  await db
+    .prepare('UPDATE messages SET content = ?, sources = ? WHERE id = ?')
+    .bind(content, sources ? JSON.stringify(sources) : null, id)
+    .run();
 }
 
 /** Removes image files from R2 first: an orphaned file would keep a deleted conversation's content alive. */

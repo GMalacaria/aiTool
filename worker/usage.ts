@@ -131,7 +131,8 @@ export async function getSearchesToday(db: D1Database, day: string): Promise<num
   return row?.answers ?? 0;
 }
 
-export type UsageKind = 'text' | 'deep' | 'document' | 'image' | 'error';
+/** 'verify': sources checked afterwards, on the user's request. */
+export type UsageKind = 'text' | 'deep' | 'document' | 'image' | 'error' | 'verify';
 
 /**
  * Stores what a request used: adds its paid tokens to today's budget and

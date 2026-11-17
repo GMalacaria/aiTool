@@ -164,7 +164,7 @@ export function Login() {
               </div>
             </div>
             <p id="guest-hint" className="composer-footnote muted">
-              Accedi per fare domande. Strumento di intelligenza artificiale: può commettere errori.
+              Accedi per fare richieste. Strumento di intelligenza artificiale: può commettere errori.
             </p>
           </form>
         </main>

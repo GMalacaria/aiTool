@@ -15,7 +15,15 @@ export interface AnswerSources {
   items: SourceItem[];
   /** False when the independent check could not run: the legend lists what was cited, with no markers. */
   verified: boolean;
+  /**
+   * A factual answer written without search (the user did not ask for verified
+   * sources): it says so, and the user can have it checked afterwards.
+   */
+  unchecked?: boolean;
 }
+
+/** What a factual answer written without search carries until it is checked. */
+export const UNCHECKED_SOURCES: AnswerSources = { items: [], verified: false, unchecked: true };
 
 export type Marker = { type: 'source'; n: number } | { type: 'unverified' } | { type: 'unreadable'; n: number };
 
@@ -58,8 +66,9 @@ export function parseSources(value: unknown): AnswerSources | null {
     }
   }
   if (typeof data !== 'object' || data === null) return null;
-  const { items, verified } = data as { items?: unknown; verified?: unknown };
+  const { items, verified, unchecked } = data as { items?: unknown; verified?: unknown; unchecked?: unknown };
   if (!Array.isArray(items) || typeof verified !== 'boolean') return null;
+  if (unchecked === true) return { ...UNCHECKED_SOURCES };
 
   const parsed: SourceItem[] = [];
   for (const item of items.slice(0, MAX_ITEMS)) {

@@ -7,7 +7,7 @@ import {
   type StoredAttachments,
 } from '../shared/attachments';
 import { parseDocument, type DocumentSpec } from '../shared/document';
-import { stripMarkers, type AnswerSources } from '../shared/sources';
+import { stripMarkers, UNCHECKED_SOURCES, type AnswerSources } from '../shared/sources';
 import type { ChatMessage, ContentPart, ProviderRouter } from './llm/router';
 import {
   applyReview,
@@ -51,6 +51,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type MessageKind = 'text' | 'document';
 
 export interface ConversationMessage {
+  /** Database id; absent for messages not stored yet. */
+  id?: number;
   role: 'user' | 'assistant';
   /** For 'document' messages, the JSON document description. */
   content: string;
@@ -92,6 +94,8 @@ export interface ChatRequest {
   attachments: Attachments;
   /** The user asked for a more in-depth answer. */
   deep: boolean;
+  /** The user asked for verified sources (slower): factual questions are answered with web search. */
+  verifySources: boolean;
 }
 
 /** Validates the client payload; returns null when it is not usable. */
@@ -101,21 +105,23 @@ export function parseChatRequest(payload: unknown): ChatRequest | null {
     message,
     attachments: rawAttachments,
     deep = false,
+    verifySources = false,
   } = (payload ?? {}) as {
     conversationId?: unknown;
     message?: unknown;
     attachments?: unknown;
     deep?: unknown;
+    verifySources?: unknown;
   };
 
   if (typeof message !== 'string' || !message.trim() || message.length > MAX_MESSAGE_CHARS) return null;
   if (conversationId !== null && (typeof conversationId !== 'string' || !UUID.test(conversationId))) return null;
-  if (typeof deep !== 'boolean') return null;
+  if (typeof deep !== 'boolean' || typeof verifySources !== 'boolean') return null;
 
   const attachments = parseAttachments(rawAttachments);
   if (!attachments) return null;
 
-  return { conversationId, message: message.trim(), attachments, deep };
+  return { conversationId, message: message.trim(), attachments, deep, verifySources };
 }
 
 /** Keeps only the most recent turns, starting from a user message: tokens are the scarce resource. */
@@ -250,7 +256,10 @@ export interface Routers {
   meter?: UsageMeter;
   /** 'student' turns the tool into a tutor that does not hand out solutions. */
   profile?: Profile;
-  /** Web search with verified sources; absent means factual questions are answered without them. */
+  /**
+   * Web search with verified sources, used only when the user asked for it;
+   * absent means factual questions are answered without them.
+   */
   sources?: SourcesConfig;
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
@@ -350,7 +359,9 @@ export async function respond(
   }
 
   const draft = await (speculativeDraft ?? draftText(routers, history, question, attachments));
-  return { text: await reviewText(routers, question, attachments, draft, history) };
+  const text = await reviewText(routers, question, attachments, draft, history);
+  // A factual answer without checked sources says so, and can be checked on request.
+  return detected === 'search' ? { text, sources: { ...UNCHECKED_SOURCES } } : { text };
 }
 
 /**

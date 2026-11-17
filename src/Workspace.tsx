@@ -9,6 +9,7 @@ import {
   fetchConversations,
   renameConversation,
   sendMessage,
+  verifyMessage,
   type Account,
   type ConversationMessage,
   type ConversationSummary,
@@ -39,6 +40,7 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_request: 'Richiesta non valida.',
   not_found: 'Conversazione non trovata.',
   service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
+  sources_unavailable: 'Verifica delle fonti non disponibile in questo momento. Riprova più tardi.',
   attachments_unavailable:
     'In questo momento gli allegati non possono essere letti. Riprova più tardi oppure invia la domanda senza allegati.',
 };
@@ -167,7 +169,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   /** Returns false when the message was not sent, so the form can give it back. */
-  async function send(content: string, attachments: Attachments, deep: boolean): Promise<boolean> {
+  async function send(content: string, attachments: Attachments, deep: boolean, verifySources: boolean): Promise<boolean> {
     const previous = messages;
     const question: ConversationMessage = {
       role: 'user',
@@ -185,11 +187,12 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     setPending(true);
 
     try {
-      const result = await sendMessage(activeId, content, attachments, deep);
+      const result = await sendMessage(activeId, content, attachments, deep, verifySources);
       setMessages([
         ...previous,
         question,
         {
+          id: result.messageId ?? undefined,
           role: 'assistant',
           content: result.answer,
           document: result.document,
@@ -220,6 +223,20 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       return false;
     } finally {
       setPending(false);
+    }
+  }
+
+  /** Checks the sources of an answer afterwards; false when it could not be done. */
+  async function verifySources(id: number): Promise<boolean> {
+    try {
+      const checked = await verifyMessage(id);
+      setMessages((list) =>
+        list.map((message) => (message.id === id ? { ...message, content: checked.content, sources: checked.sources } : message)),
+      );
+      return true;
+    } catch (cause) {
+      handleFailure(cause);
+      return false;
     }
   }
 
@@ -320,6 +337,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             freeMode={freeMode}
             freeAvailable={account.freeAvailable}
             onSend={send}
+            onVerifySources={verifySources}
           />
         )}
       </div>

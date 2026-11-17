@@ -77,6 +77,14 @@ describe('source markers', () => {
     expect(html).not.toContain('#source-1');
   });
 
+  it('offers the check under a factual answer written without search', () => {
+    const unchecked = { items: [], verified: false, unchecked: true };
+    const withButton = renderToStaticMarkup(<Markdown text="Testo." sources={unchecked} onVerify={async () => true} />);
+    expect(withButton).toContain('Fonti non verificate');
+    expect(withButton).toContain('>Verifica fonti</button>');
+    expect(renderToStaticMarkup(<Markdown text="Testo." sources={unchecked} />)).not.toContain('<button');
+  });
+
   it('says when the sources could not be checked', () => {
     const html = renderToStaticMarkup(<Markdown text="Testo." sources={{ ...sources, verified: false }} />);
     expect(html).toContain('Fonti consultate (verifica non disponibile)');

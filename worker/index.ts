@@ -40,17 +40,20 @@ import {
   deleteAllConversations,
   deleteConversation,
   findConversation,
+  findAnswer,
   findImage,
+  lastAnswerId,
   listConversations,
   listMessages,
   MAX_TITLE_CHARS,
   renameConversation,
+  saveCheckedAnswer,
   searchConversations,
   saveExchange,
 } from './conversations';
 import { PROFILES, type AppEnv, type Env, type UserStatus } from './env';
 import { getRouter, hasFreeProviders, OPENAI_MODELS, OPENAI_PRICES, type Tier } from './llm/providers';
-import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, type SourcesConfig } from './sources';
+import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, verifyAnswer, type SourcesConfig } from './sources';
 import { UsageMeter } from './meter';
 import { streaks, usageTotals } from './stats';
 import { AllProvidersFailedError } from './llm/router';
@@ -146,11 +149,12 @@ function toClientMessage(message: ConversationMessage) {
 
   const freeModel = message.freeModel ? true : undefined;
   const sources = message.sources ? (parseSources(message.sources) ?? undefined) : undefined;
-  if (message.imageId) return { role: message.role, content: '', image: { id: message.imageId } };
+  const id = message.id;
+  if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId } };
 
   return document
-    ? { role: message.role, content: document.title, document, freeModel }
-    : { role: message.role, content: message.content, attachments, freeModel, sources };
+    ? { id, role: message.role, content: document.title, document, freeModel }
+    : { id, role: message.role, content: message.content, attachments, freeModel, sources };
 }
 
 app.use(requireSameOrigin);
@@ -378,7 +382,10 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           review: getRouter(c.env, 'standard', freeMode),
           deep: useDeep,
           meter,
-          sources: await sourcesConfig(c.env, db, day, useDeep ? 'deep' : 'standard', freeMode),
+          // Only when the user asked for verified sources: the search makes the answer slower.
+          sources: request.verifySources
+            ? await sourcesConfig(c.env, db, day, useDeep ? 'deep' : 'standard', freeMode)
+            : undefined,
           profile: user.profile,
           images: {
             enabled: imagesEnabled(c.env),
@@ -473,6 +480,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     await saveUsage();
 
     return c.json({
+      messageId: await lastAnswerId(db, conversation.id),
       answer: result.document ? result.document.title : result.text,
       document: result.document,
       image: imageId ? { id: imageId } : undefined,
@@ -507,6 +515,39 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       return c.json({ error: freeMode ? 'free_quota_exhausted' : 'quota_exhausted' }, 429);
     }
     return c.json({ error: 'service_unavailable' }, 503);
+  }
+});
+
+/**
+ * Checks the sources of an answer written without search, on the user's
+ * request. Paid by the owner: it uses no allowance, only the app-wide cap.
+ */
+app.post('/messages/:id/verify', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  const answer = Number.isInteger(id) ? await findAnswer(c.env.DB, user, id) : null;
+  if (!answer) return c.json({ error: 'not_found' }, 404);
+
+  const current = answer.sources ? parseSources(answer.sources) : null;
+  // Already checked (or never factual): nothing to do, the stored answer is returned.
+  if (answer.kind !== 'text' || !current?.unchecked) {
+    return c.json({ content: answer.content, sources: current ?? undefined });
+  }
+
+  const day = currentDay();
+  const config = await sourcesConfig(c.env, c.env.DB, day, 'standard', false);
+  if (!config) return c.json({ error: 'sources_unavailable' }, 503);
+
+  const meter = new UsageMeter();
+  try {
+    const checked = await verifyAnswer(config, answer.question, answer.content, meter);
+    await saveCheckedAnswer(c.env.DB, answer.id, checked.text, checked.sources);
+    await recordUsage(c.env.DB, user, day, 'verify', 'paid', meter);
+    return c.json({ content: checked.text, sources: checked.sources ?? undefined });
+  } catch (error) {
+    console.error('source check failed', error);
+    await recordUsage(c.env.DB, user, day, 'error', 'paid', meter).catch(() => undefined);
+    return c.json({ error: 'sources_unavailable' }, 503);
   }
 });
 

@@ -29,6 +29,8 @@ export interface Account {
 }
 
 export interface ConversationMessage {
+  /** Database id of a stored message (needed to check its sources later). */
+  id?: number;
   role: 'user' | 'assistant';
   /** For document answers, the document title. */
   content: string;
@@ -50,6 +52,8 @@ export interface ConversationSummary {
 }
 
 export interface ChatResult {
+  /** Id of the stored answer; null when it was not stored. */
+  messageId?: number | null;
   answer: string;
   /** Absent on fixed answers, which do not touch the allowances. */
   deepRemaining?: number;
@@ -123,6 +127,7 @@ const KNOWN_ERRORS = [
   'service_unavailable',
   'attachments_unavailable',
   'invalid_request',
+  'sources_unavailable',
 ] as const;
 
 export type ApiErrorCode = (typeof KNOWN_ERRORS)[number];
@@ -199,7 +204,12 @@ export const sendMessage = (
   message: string,
   attachments: Attachments,
   deep: boolean,
-) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep });
+  verifySources: boolean,
+) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep, verifySources });
+
+/** Checks the sources of an answer given without them; returns the marked text and its legend. */
+export const verifyMessage = (id: number) =>
+  request<{ content: string; sources?: AnswerSources }>(`/messages/${id}/verify`, 'POST');
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
 export const fetchUserUsage = (id: number, days = 30) =>

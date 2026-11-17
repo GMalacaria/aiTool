@@ -139,3 +139,40 @@ export function SourceLegend({ sources, unreadable }: { sources: AnswerSources; 
     </section>
   );
 }
+
+/** Under a factual answer written without search: says so, and offers the check. */
+export function UncheckedNotice({ onVerify }: { onVerify?: () => Promise<boolean> }) {
+  const [state, setState] = useState<'idle' | 'checking' | 'failed'>('idle');
+
+  async function verify() {
+    if (!onVerify) return;
+    setState('checking');
+    // On success the answer is replaced and this notice disappears.
+    if (!(await onVerify())) setState('failed');
+  }
+
+  return (
+    <section className="source-legend source-unchecked" aria-label="Fonti">
+      {state === 'checking' ? (
+        <p role="status">
+          Verifica delle fonti in corso
+          <span className="loading-dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </p>
+      ) : (
+        <p>
+          Fonti non verificate: risposta scritta senza cercare sul web.{' '}
+          {onVerify && (
+            <button type="button" className="link-button" onClick={() => void verify()}>
+              Verifica fonti
+            </button>
+          )}
+          {state === 'failed' && <span className="error"> Verifica non riuscita.</span>}
+        </p>
+      )}
+    </section>
+  );
+}
