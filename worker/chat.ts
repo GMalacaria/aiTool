@@ -19,8 +19,13 @@ import {
   parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
+  STUDENT_DOCUMENT_INSTRUCTION,
+  STUDENT_INSTRUCTION,
+  STUDENT_REVIEW_INSTRUCTION,
   SYSTEM_PROMPT,
 } from './prompts';
+import type { Profile } from './env';
+import type { UsageMeter } from './meter';
 
 /** Previous messages of the conversation sent to the model along with the new question. */
 export const MAX_HISTORY_MESSAGES = 8;
@@ -45,6 +50,8 @@ export interface ConversationMessage {
   attachments: StoredAttachments | null;
   /** The generated image shown with an assistant message. */
   imageId?: string | null;
+  /** 1 when the answer came from a free-tier model. */
+  freeModel?: number;
 }
 
 export interface ChatRequest {
@@ -160,6 +167,10 @@ export interface Routers {
   /** Always the standard model: intent detection and the review pass. */
   review: ProviderRouter;
   deep: boolean;
+  /** Collects the tokens of every call, for the usage log and the daily budget. */
+  meter?: UsageMeter;
+  /** 'student' turns the tool into a tutor that does not hand out solutions. */
+  profile?: Profile;
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
     enabled: boolean;
@@ -192,6 +203,7 @@ export async function detectIntent(
   history: ConversationMessage[],
   question: string,
   attachments: Attachments,
+  meter?: UsageMeter,
 ): Promise<'text' | 'document' | 'image'> {
   try {
     const reply = await router.complete(
@@ -202,7 +214,7 @@ export async function detectIntent(
           content: buildIntentInput(question, previousAnswer(history), attachmentNames(attachments)),
         },
       ],
-      { maxOutputTokens: MAX_INTENT_OUTPUT_TOKENS, fast: true, timeoutMs: INTENT_TIMEOUT_MS },
+      { maxOutputTokens: MAX_INTENT_OUTPUT_TOKENS, fast: true, timeoutMs: INTENT_TIMEOUT_MS, meter, purpose: 'intent' },
     );
     return parseIntent(reply);
   } catch (error) {
@@ -226,7 +238,7 @@ export async function respond(
   question: string,
   attachments: Attachments = { documents: [], images: [] },
 ): Promise<Reply> {
-  const intent = detectIntent(routers.review, history, question, attachments);
+  const intent = detectIntent(routers.review, history, question, attachments, routers.meter);
 
   const speculativeDraft = routers.deep ? null : draftText(routers, history, question, attachments);
   // A failure is reported only if this draft ends up being used.
@@ -234,7 +246,9 @@ export async function respond(
 
   const detected = await intent;
   if (detected === 'document') {
-    return { document: await createDocument(routers.draft, history, question, attachments) };
+    return {
+      document: await createDocument(routers.draft, history, question, attachments, routers.meter, routers.profile),
+    };
   }
   if (detected === 'image') return planImage(routers, history, question);
 
@@ -258,6 +272,8 @@ async function planImage(routers: Routers, history: ConversationMessage[], quest
       buildMessages(IMAGE_PROMPT_SYSTEM_PROMPT, history, question, { documents: [], images: [] }, 'text'),
       {
         maxOutputTokens: MAX_IMAGE_PLAN_OUTPUT_TOKENS,
+        meter: routers.meter,
+        purpose: 'plan',
         json: true,
         fast: true,
         timeoutMs: INTENT_TIMEOUT_MS * 2,
@@ -283,8 +299,14 @@ function draftText(
   question: string,
   attachments: Attachments,
 ): Promise<string> {
-  const systemPrompt = routers.deep ? `${SYSTEM_PROMPT}\n${DEEP_INSTRUCTION}` : SYSTEM_PROMPT;
+  const systemPrompt = [
+    SYSTEM_PROMPT,
+    ...(routers.deep ? [DEEP_INSTRUCTION] : []),
+    ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
+  ].join('\n');
   return routers.draft.complete(buildMessages(systemPrompt, history, question, attachments, 'text'), {
+    meter: routers.meter,
+    purpose: 'draft',
     maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
     timeoutMs: routers.deep ? LONG_TIMEOUT_MS : undefined,
     containsAttachments: usesAttachments(history, attachments),
@@ -296,10 +318,18 @@ async function reviewText(routers: Routers, question: string, attachments: Attac
   try {
     const review = await routers.review.complete(
       [
-        { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+        {
+          role: 'system',
+          content:
+            routers.profile === 'student' ? `${REVIEW_SYSTEM_PROMPT}\n${STUDENT_REVIEW_INSTRUCTION}` : REVIEW_SYSTEM_PROMPT,
+        },
         { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments), draft) },
       ],
-      { maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS },
+      {
+        maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
+        meter: routers.meter,
+        purpose: 'review',
+      },
     );
     return applyReview(draft, review);
   } catch (error) {
@@ -318,8 +348,14 @@ export async function createDocument(
   history: ConversationMessage[],
   question: string,
   attachments: Attachments = { documents: [], images: [] },
+  meter?: UsageMeter,
+  profile?: Profile,
 ): Promise<DocumentSpec> {
-  const raw = await router.complete(buildMessages(DOCUMENT_SYSTEM_PROMPT, history, question, attachments, 'document'), {
+  const systemPrompt =
+    profile === 'student' ? `${DOCUMENT_SYSTEM_PROMPT}\n${STUDENT_DOCUMENT_INSTRUCTION}` : DOCUMENT_SYSTEM_PROMPT;
+  const raw = await router.complete(buildMessages(systemPrompt, history, question, attachments, 'document'), {
+    meter,
+    purpose: 'document',
     maxOutputTokens: MAX_DOCUMENT_OUTPUT_TOKENS,
     json: true,
     timeoutMs: LONG_TIMEOUT_MS,

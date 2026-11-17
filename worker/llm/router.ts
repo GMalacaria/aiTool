@@ -1,3 +1,5 @@
+import { costMicroUsd, type CallPurpose, type Price, type UsageMeter } from '../meter';
+
 export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
@@ -25,6 +27,10 @@ export interface Provider {
    * allow training on the data: such providers are skipped for those requests.
    */
   acceptsAttachments: boolean;
+  /** A free-tier provider: its tokens do not count against the paid budget. */
+  free: boolean;
+  /** USD per million tokens, for the usage log. */
+  price?: Price;
 }
 
 export interface CompletionOptions {
@@ -36,6 +42,9 @@ export interface CompletionOptions {
   /** The messages carry the content of attached files (also in the history). */
   containsAttachments?: boolean;
   timeoutMs?: number;
+  /** Where to record the tokens this call used, and what the call was for. */
+  meter?: UsageMeter;
+  purpose?: CallPurpose;
 }
 
 export class AllProvidersFailedError extends Error {
@@ -43,6 +52,8 @@ export class AllProvidersFailedError extends Error {
     readonly failures: string[],
     /** Some provider was left out only because it must not receive attachments. */
     readonly attachmentsSkipped = false,
+    /** Every provider tried was out of quota (HTTP 429, or skipped until its reset). */
+    readonly rateLimited = false,
   ) {
     super(`All providers failed: ${failures.join('; ')}`);
     this.name = 'AllProvidersFailedError';
@@ -69,10 +80,14 @@ export class ProviderRouter {
   async complete(messages: ChatMessage[], options: CompletionOptions): Promise<string> {
     const failures: string[] = [];
     let attachmentsSkipped = false;
+    let attempts = 0;
+    let rateLimitedAttempts = 0;
 
     for (const provider of this.providers) {
       if ((this.exhaustedUntil.get(provider.name) ?? 0) > this.now()) {
         failures.push(`${provider.name}: rate limited, skipped`);
+        attempts += 1;
+        rateLimitedAttempts += 1;
         continue;
       }
 
@@ -82,14 +97,16 @@ export class ProviderRouter {
         continue;
       }
 
+      attempts += 1;
       try {
         return await this.call(provider, messages, options);
       } catch (error) {
+        if (error instanceof RateLimitError) rateLimitedAttempts += 1;
         failures.push(`${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    throw new AllProvidersFailedError(failures, attachmentsSkipped);
+    throw new AllProvidersFailedError(failures, attachmentsSkipped, attempts > 0 && rateLimitedAttempts === attempts);
   }
 
   private async call(provider: Provider, messages: ChatMessage[], options: CompletionOptions): Promise<string> {
@@ -114,6 +131,7 @@ export class ProviderRouter {
 
     if (response.status === 429) {
       this.exhaustedUntil.set(provider.name, this.now() + retryAfterMs(response.headers));
+      throw new RateLimitError(`HTTP 429 ${(await response.text()).slice(0, 200)}`);
     }
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);
@@ -121,9 +139,29 @@ export class ProviderRouter {
     }
 
     const data = (await response.json()) as { choices?: { message?: { content?: unknown } }[] };
+    const usage = (data as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } }).usage;
+    const inputTokens = typeof usage?.prompt_tokens === 'number' ? usage.prompt_tokens : 0;
+    const outputTokens = typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : 0;
+    options.meter?.record({
+      purpose: options.purpose ?? 'draft',
+      provider: provider.name,
+      model: provider.model,
+      free: provider.free,
+      inputTokens,
+      outputTokens,
+      costMicroUsd: provider.free ? 0 : costMicroUsd(provider.price, inputTokens, outputTokens),
+    });
+
     const content = data.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) throw new Error('empty completion');
     return content.trim();
+  }
+}
+
+class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
   }
 }
 

@@ -79,6 +79,14 @@ Rules:
 - The multi-provider router also protects against price changes.
 - **Fallbacks implemented 2026-11-17** (`worker/llm/providers.ts`): Groq (`llama-3.3-70b-versatile`) and Gemini (`gemini-flash-lite-latest`) through their OpenAI-compatible endpoints, each enabled only if its secret (`GROQ_API_KEY`, `GEMINI_API_KEY`) is set; models and endpoints can be overridden (`*_MODEL`, `*_BASE_URL`). Order: OpenAI, Groq, Gemini. They serve only the standard tier (never the in-depth answers), and **never receive attached files** (images, extracted document text, also from earlier messages), because free tiers may train on the data and colleagues' conversations can hold private documents; such requests fail with a clear message while OpenAI is unavailable. Model ids are defaults to verify against the provider consoles. Not yet tried against the real providers.
 
+## Usage, budgets and profiles (added 2026-11-17)
+
+- **Why**: the monthly budget only holds if every person has a daily ceiling on tokens, not only on messages.
+- **Usage log** (`usage_events`, `worker/meter.ts`): one row per chat request with paid and free input/output tokens, images, estimated cost in micro-USD and the providers used. No message content. Every model call goes through the meter (intent, draft, review, document, image planning), including a speculative draft that is later discarded and requests that fail. Prices are in `worker/llm/providers.ts` (`OPENAI_PRICES`) and `IMAGE_PRICE_USD`; they are estimates to keep up to date.
+- **Daily paid-token budget** per user (`users.daily_token_limit`, default 100,000, counted in `daily_usage.paid_tokens`). Past it the user is in **free mode** until midnight (Italian time): only free-tier models answer (Groq, Gemini); in-depth answers and attachments are not available (free tiers never receive attachments); images still follow their own allowance. The UI says so with a banner, labels each answer written by a free model, and shows the share of tokens used. When the free tiers are out of quota too, the user gets "token giornalieri e modelli gratuiti esauriti, torna domani" (`free_quota_exhausted`); with no free provider configured, `tokens_exhausted`. A request can overshoot the budget once, because tokens are counted after it.
+- **Profiles** (`users.profile`): `professional` (default, the normal behaviour) and `student`: a tutor that never hands over the solution of homework, exercises, tests, translations or essays, explains the method, gives the next step and checks the student's attempts; plain factual questions are still answered directly. Applied to the answer prompt, the review prompt (which also removes full solutions) and the document prompt (homework becomes a study guide).
+- **Administration** ("Utenti"): per user profile, daily limits (messages, in-depth answers, images, paid tokens), today's and this month's usage, a day-by-day table for the last 30 days, and the estimated monthly cost of everybody.
+
 ## MVP decisions (confirmed 2026-11-16)
 
 - **Backend stack**: Cloudflare Workers (free tier), TypeScript, Hono. The React frontend is served by the same Worker as static assets.
@@ -152,6 +160,8 @@ With free tiers the blocking limit is almost always **tokens per day**, not requ
 - low temperature.
 
 ## Model behaviour (guidelines for the system prompt)
+
+- Mathematics is written in plain text with Unicode symbols, never LaTeX (the chat does not render LaTeX).
 
 - Direct answer to the question, no preamble.
 - No compliments ("great question" etc.), no expression of its own emotions.

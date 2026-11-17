@@ -25,6 +25,10 @@ interface WorkspaceProps {
 const ERROR_TEXT: Record<string, string> = {
   daily_limit_reached: 'Limite giornaliero raggiunto, torna domani.',
   image_limit_reached: 'Limite giornaliero di immagini raggiunto, torna domani.',
+  tokens_exhausted: 'Hai esaurito i token giornalieri. Torna domani.',
+  free_quota_exhausted:
+    'Hai esaurito i token giornalieri e anche i modelli gratuiti hanno raggiunto il loro limite. Torna domani.',
+  quota_exhausted: 'Tutti i modelli hanno raggiunto il loro limite. Riprova più tardi.',
   invalid_request: 'Richiesta non valida.',
   not_found: 'Conversazione non trovata.',
   service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
@@ -39,6 +43,8 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [remaining, setRemaining] = useState(account.remaining);
   const [deepRemaining, setDeepRemaining] = useState(account.deepRemaining);
   const [imageRemaining, setImageRemaining] = useState(account.imageRemaining);
+  const [tokensUsed, setTokensUsed] = useState(account.tokensUsed);
+  const [freeMode, setFreeMode] = useState(account.freeMode);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'users'>('chat');
@@ -112,10 +118,19 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
 
     try {
       const result = await sendMessage(activeId, content, attachments, deep);
-      setMessages([...previous, question, { role: 'assistant', content: result.answer, document: result.document, image: result.image }]);
+      setMessages([...previous, question, {
+          role: 'assistant',
+          content: result.answer,
+          document: result.document,
+          image: result.image,
+          freeModel: result.answeredByFreeModel,
+        },]);
       setRemaining(result.remaining);
       if (result.deepRemaining !== undefined) setDeepRemaining(result.deepRemaining);
       if (result.imageRemaining !== undefined) setImageRemaining(result.imageRemaining);
+      if (result.tokensUsed !== undefined) setTokensUsed(result.tokensUsed);
+      // The next request already runs on free models once the budget is passed.
+      if (result.tokensUsed !== undefined && result.tokensUsed >= account.tokenLimit) setFreeMode(true);
 
       const saved = result.conversation;
       if (saved) {
@@ -128,6 +143,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       const code = handleFailure(cause);
       if (code === 'daily_limit_reached') setRemaining(0);
       if (code === 'image_limit_reached') setImageRemaining(0);
+      if (code === 'tokens_exhausted' || code === 'free_quota_exhausted') setFreeMode(true);
       return false;
     } finally {
       setPending(false);
@@ -221,7 +237,11 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
               Utenti
             </button>
           )}
-          <p className="muted account-email">{account.email}</p>
+          <p className="muted account-email">
+            {account.email}
+            <br />
+            Profilo: {account.profile === 'student' ? 'Studente' : 'Professionale'}
+          </p>
           <div className="panel-row">
             <button type="button" onClick={onSignOut}>
               Esci
@@ -257,6 +277,10 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             imagesEnabled={account.imagesEnabled}
             imageRemaining={imageRemaining}
             imageLimit={account.imageLimit}
+            tokensUsed={tokensUsed}
+            tokenLimit={account.tokenLimit}
+            freeMode={freeMode}
+            freeAvailable={account.freeAvailable}
             onSend={send}
           />
         )}

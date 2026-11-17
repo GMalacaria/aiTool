@@ -23,8 +23,12 @@ import {
   parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
+  STUDENT_DOCUMENT_INSTRUCTION,
+  STUDENT_INSTRUCTION,
+  STUDENT_REVIEW_INSTRUCTION,
   SYSTEM_PROMPT,
 } from './prompts';
+import { UsageMeter } from './meter';
 import { detectSensitiveTopic } from './sensitive';
 import { currentDay } from './usage';
 
@@ -86,6 +90,11 @@ function fakeRouters({
     standardComplete.mock.calls.filter(([messages]) => messages[0].content === systemPrompt);
   return { routers, draftComplete, standardComplete, callsWith, isFlagged };
 }
+
+const standardSystemPrompts = (callsWith: ReturnType<typeof fakeRouters>['callsWith']) =>
+  [REVIEW_SYSTEM_PROMPT, `${REVIEW_SYSTEM_PROMPT}\n${STUDENT_REVIEW_INSTRUCTION}`].flatMap((prompt) =>
+    callsWith(prompt).map(([messages]) => messages[0].content as string),
+  );
 
 describe('parseChatRequest', () => {
   it('accepts a new conversation and trims the message', () => {
@@ -365,6 +374,57 @@ describe('parseImagePlan', () => {
     ['a plan without a verdict', '{"prompt":"a cat"}'],
   ])('rejects %s', (_label, raw) => {
     expect(parseImagePlan(raw)).toBeNull();
+  });
+});
+
+describe('student profile', () => {
+  it('turns the answer and the review into tutoring', async () => {
+    const { routers, draftComplete, callsWith } = fakeRouters({ draft: 'Isola la x: qual è il primo passo?' });
+    routers.profile = 'student';
+
+    await respond(routers, [], 'Risolvi 2x + 5 = 13');
+
+    expect(draftComplete.mock.calls[0][0][0].content).toBe(`${SYSTEM_PROMPT}\n${STUDENT_INSTRUCTION}`);
+    const review = standardSystemPrompts(callsWith).find((prompt) => prompt.startsWith(REVIEW_SYSTEM_PROMPT));
+    expect(review).toBe(`${REVIEW_SYSTEM_PROMPT}\n${STUDENT_REVIEW_INSTRUCTION}`);
+  });
+
+  it('keeps the professional prompts unchanged', async () => {
+    const { routers, draftComplete } = fakeRouters();
+    routers.profile = 'professional';
+    await respond(routers, [], 'Risolvi 2x + 5 = 13');
+    expect(draftComplete.mock.calls[0][0][0].content).toBe(SYSTEM_PROMPT);
+  });
+
+  it('turns homework documents into study guides', async () => {
+    const spec = JSON.stringify({ title: 'Guida', blocks: [{ type: 'paragraph', text: 'Metodo' }] });
+    const { routers, draftComplete } = fakeRouters({ intent: 'document', draft: spec });
+    routers.profile = 'student';
+
+    await respond(routers, [], 'Fammi un PDF con il tema svolto');
+
+    const documentCall = draftComplete.mock.calls.find(([messages]) => String(messages[0].content).startsWith(DOCUMENT_SYSTEM_PROMPT))!;
+    expect(documentCall[0][0].content).toBe(`${DOCUMENT_SYSTEM_PROMPT}\n${STUDENT_DOCUMENT_INSTRUCTION}`);
+  });
+
+  it('says plainly what the student mode forbids and allows', () => {
+    expect(STUDENT_INSTRUCTION).toMatch(/Never give the finished solution/);
+    expect(STUDENT_INSTRUCTION).toMatch(/ending with one short question .* is allowed/);
+  });
+});
+
+describe('usage metering', () => {
+  it('passes the meter and the purpose to every call', async () => {
+    const { routers, draftComplete, standardComplete } = fakeRouters({ draft: 'Rome.' });
+    routers.meter = new UsageMeter();
+
+    await respond(routers, [], 'Capital of Italy?');
+
+    const purposes = [...standardComplete.mock.calls, ...draftComplete.mock.calls].map(([, options]) => options.purpose);
+    expect(purposes.sort()).toEqual(['draft', 'intent', 'review']);
+    for (const [, options] of [...standardComplete.mock.calls, ...draftComplete.mock.calls]) {
+      expect(options.meter).toBe(routers.meter);
+    }
   });
 });
 

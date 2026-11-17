@@ -1,6 +1,6 @@
 import { getCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
-import type { AppEnv, Env, User, UserStatus } from '../env';
+import type { AppEnv, Env, Profile, User, UserStatus } from '../env';
 import type { GoogleProfile } from './google';
 
 export const SESSION_COOKIE = 'session';
@@ -32,6 +32,8 @@ interface UserRow {
   daily_message_limit: number;
   daily_deep_limit: number;
   daily_image_limit: number;
+  daily_token_limit: number;
+  profile: Profile;
 }
 
 function toUser(env: Env, row: UserRow): User {
@@ -42,10 +44,12 @@ function toUser(env: Env, row: UserRow): User {
     name: row.name,
     // Admins can never lock themselves out.
     status: isAdmin ? 'approved' : row.status,
+    profile: row.profile,
     isAdmin,
     dailyMessageLimit: row.daily_message_limit,
     dailyDeepLimit: row.daily_deep_limit,
     dailyImageLimit: row.daily_image_limit,
+    dailyTokenLimit: row.daily_token_limit,
   };
 }
 
@@ -54,7 +58,8 @@ export async function upsertUser(env: Env, profile: GoogleProfile): Promise<User
   const row = await env.DB.prepare(
     `INSERT INTO users (google_sub, email, name, status) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT (google_sub) DO UPDATE SET email = excluded.email, name = excluded.name
-     RETURNING id, email, name, status, daily_message_limit, daily_deep_limit, daily_image_limit`,
+     RETURNING id, email, name, status, daily_message_limit, daily_deep_limit, daily_image_limit,
+       daily_token_limit, profile`,
   )
     .bind(profile.sub, profile.email, profile.name, isAdminEmail(env, profile.email) ? 'approved' : 'pending')
     .first<UserRow>();
@@ -83,7 +88,8 @@ export async function deleteSession(db: D1Database, token: string): Promise<void
 
 export async function findUserBySession(env: Env, token: string, now: number = Date.now()): Promise<User | null> {
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.status, u.daily_message_limit, u.daily_deep_limit, u.daily_image_limit
+    `SELECT u.id, u.email, u.name, u.status, u.daily_message_limit, u.daily_deep_limit, u.daily_image_limit,
+            u.daily_token_limit, u.profile
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )

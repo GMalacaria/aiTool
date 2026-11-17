@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { UsageMeter } from '../meter';
 import { AllProvidersFailedError, ProviderRouter, type Provider } from './router';
 
 const provider = (name: string, overrides: Partial<Provider> = {}): Provider => ({
@@ -8,6 +9,7 @@ const provider = (name: string, overrides: Partial<Provider> = {}): Provider => 
   apiKey: `${name}-key`,
   maxTokensParam: 'max_tokens',
   acceptsAttachments: true,
+  free: false,
   ...overrides,
 });
 
@@ -107,6 +109,47 @@ describe('ProviderRouter', () => {
     const refused = await onlyB.complete(messages, { ...options, containsAttachments: true }).catch((error) => error);
     expect(refused).toBeInstanceOf(AllProvidersFailedError);
     expect(refused.attachmentsSkipped).toBe(true);
+  });
+
+  it('records the tokens of each call, with its purpose, cost and whether it was free', async () => {
+    const fetchFn = vi.fn(async (url: string) =>
+      url.startsWith('https://a.test')
+        ? new Response('down', { status: 500 })
+        : Response.json({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1000, completion_tokens: 200 } }),
+    );
+    const router = new ProviderRouter(
+      [provider('a', { price: { inputPerMillion: 0.1, outputPerMillion: 0.5 } }), provider('b', { free: true })],
+      fetchFn as unknown as typeof fetch,
+    );
+    const meter = new UsageMeter();
+
+    await router.complete(messages, { ...options, meter, purpose: 'review' });
+
+    expect(meter.records).toEqual([
+      { purpose: 'review', provider: 'b', model: 'b-model', free: true, inputTokens: 1000, outputTokens: 200, costMicroUsd: 0 },
+    ]);
+    expect(meter.paidTokens).toBe(0);
+    expect(meter.freeInputTokens).toBe(1000);
+  });
+
+  it('reports when every provider is out of quota', async () => {
+    const fetchFn = vi.fn(async () => new Response('quota', { status: 429 }));
+    const router = new ProviderRouter([provider('a'), provider('b')], fetchFn as unknown as typeof fetch);
+
+    const first = await router.complete(messages, options).catch((error) => error);
+    expect(first.rateLimited).toBe(true);
+    // Both are now skipped until their reset: still out of quota.
+    const second = await router.complete(messages, options).catch((error) => error);
+    expect(second.rateLimited).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not call it out of quota when a provider failed for another reason', async () => {
+    const fetchFn = vi.fn(async (url: string) =>
+      url.startsWith('https://a.test') ? new Response('quota', { status: 429 }) : new Response('down', { status: 500 }),
+    );
+    const router = new ProviderRouter([provider('a'), provider('b')], fetchFn as unknown as typeof fetch);
+    expect((await router.complete(messages, options).catch((error) => error)).rateLimited).toBe(false);
   });
 
   it('throws when every provider fails', async () => {

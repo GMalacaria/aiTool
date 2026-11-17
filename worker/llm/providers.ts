@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import type { Price } from '../meter';
 import { ProviderRouter, type Provider } from './router';
 
 /** 'standard' answers every message; 'deep' is the "more in-depth answer" model. */
@@ -7,6 +8,12 @@ export type Tier = 'standard' | 'deep';
 const OPENAI_MODELS: Record<Tier, string> = {
   standard: 'gpt-6-luna',
   deep: 'gpt-6-sol',
+};
+
+/** USD per million tokens, November 2026 — verify on the provider's pricing page. */
+const OPENAI_PRICES: Record<Tier, Price> = {
+  standard: { inputPerMillion: 0.1, outputPerMillion: 0.5 },
+  deep: { inputPerMillion: 2, outputPerMillion: 10 },
 };
 
 const GROQ_DEFAULTS = { baseURL: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' };
@@ -24,10 +31,11 @@ const FALLBACK_TEMPERATURE = 0.3;
  * attached files: their terms may allow training on the data, and the
  * conversations of colleagues can contain private documents.
  */
-export function buildProviders(env: Env, tier: Tier): Provider[] {
+export function buildProviders(env: Env, tier: Tier, freeOnly = false): Provider[] {
   const providers: Provider[] = [];
 
-  if (env.OPENAI_API_KEY) {
+  // Once the user's paid tokens for the day are used up, only free tiers answer.
+  if (env.OPENAI_API_KEY && !freeOnly) {
     providers.push({
       name: `openai-${tier}`,
       baseURL: (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
@@ -36,6 +44,8 @@ export function buildProviders(env: Env, tier: Tier): Provider[] {
       maxTokensParam: 'max_completion_tokens',
       fastParams: { reasoning_effort: 'none' },
       acceptsAttachments: true,
+      free: false,
+      price: OPENAI_PRICES[tier],
     });
   }
 
@@ -49,6 +59,7 @@ export function buildProviders(env: Env, tier: Tier): Provider[] {
         maxTokensParam: 'max_tokens',
         temperature: FALLBACK_TEMPERATURE,
         acceptsAttachments: false,
+        free: true,
       });
     }
 
@@ -61,6 +72,7 @@ export function buildProviders(env: Env, tier: Tier): Provider[] {
         maxTokensParam: 'max_tokens',
         temperature: FALLBACK_TEMPERATURE,
         acceptsAttachments: false,
+        free: true,
       });
     }
   }
@@ -68,10 +80,21 @@ export function buildProviders(env: Env, tier: Tier): Provider[] {
   return providers;
 }
 
-let cached: { key: string; routers: Record<Tier, ProviderRouter> } | undefined;
+type RouterSet = Record<Tier | 'free', ProviderRouter>;
 
-/** One router per tier and isolate, so the rate-limit state survives across requests. */
-export function getRouter(env: Env, tier: Tier = 'standard'): ProviderRouter {
+let cached: { key: string; routers: RouterSet } | undefined;
+
+/** True when at least one free-tier provider is configured. */
+export function hasFreeProviders(env: Env): boolean {
+  return buildProviders(env, 'standard', true).length > 0;
+}
+
+/**
+ * One router per tier and isolate, so the rate-limit state survives across
+ * requests. `freeOnly` gives the free-tier router used when the user's paid
+ * tokens are used up (there is no in-depth tier among free models).
+ */
+export function getRouter(env: Env, tier: Tier = 'standard', freeOnly = false): ProviderRouter {
   const key = JSON.stringify([
     env.OPENAI_BASE_URL,
     env.OPENAI_API_KEY,
@@ -88,8 +111,9 @@ export function getRouter(env: Env, tier: Tier = 'standard'): ProviderRouter {
       routers: {
         standard: new ProviderRouter(buildProviders(env, 'standard')),
         deep: new ProviderRouter(buildProviders(env, 'deep')),
+        free: new ProviderRouter(buildProviders(env, 'standard', true)),
       },
     };
   }
-  return cached.routers[tier];
+  return freeOnly ? cached.routers.free : cached.routers[tier];
 }

@@ -1,3 +1,4 @@
+import type { UsageMeter } from './meter';
 import type { User } from './env';
 
 const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' });
@@ -110,4 +111,58 @@ export async function refundImage(db: D1Database, user: User, day: string): Prom
     .prepare('UPDATE daily_usage SET images = images - 1 WHERE user_id = ? AND day = ? AND images > 0')
     .bind(user.id, day)
     .run();
+}
+
+/** Paid-model tokens used today, counted against `user.dailyTokenLimit`. */
+export async function getPaidTokens(db: D1Database, user: User, day: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT paid_tokens FROM daily_usage WHERE user_id = ? AND day = ?')
+    .bind(user.id, day)
+    .first<{ paid_tokens: number }>();
+  return row?.paid_tokens ?? 0;
+}
+
+export type UsageKind = 'text' | 'deep' | 'document' | 'image' | 'error';
+
+/**
+ * Stores what a request used: adds its paid tokens to today's budget and
+ * writes one row of the usage log. No message content is stored.
+ */
+export async function recordUsage(
+  db: D1Database,
+  user: User,
+  day: string,
+  kind: UsageKind,
+  mode: 'paid' | 'free',
+  meter: UsageMeter,
+): Promise<void> {
+  if (!meter.records.length && !meter.images) return;
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO daily_usage (user_id, day, messages, paid_tokens) VALUES (?1, ?2, 0, ?3)
+         ON CONFLICT (user_id, day) DO UPDATE SET paid_tokens = paid_tokens + ?3`,
+      )
+      .bind(user.id, day, meter.paidTokens),
+    db
+      .prepare(
+        `INSERT INTO usage_events (user_id, day, kind, mode, paid_input_tokens, paid_output_tokens,
+           free_input_tokens, free_output_tokens, images, cost_micro_usd, served_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        user.id,
+        day,
+        kind,
+        mode,
+        meter.paidInputTokens,
+        meter.paidOutputTokens,
+        meter.freeInputTokens,
+        meter.freeOutputTokens,
+        meter.images,
+        meter.costMicroUsd,
+        meter.servedBy,
+      ),
+  ]);
 }

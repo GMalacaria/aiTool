@@ -2,6 +2,7 @@ import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
+export type Profile = 'professional' | 'student';
 
 export interface Account {
   name: string;
@@ -17,6 +18,13 @@ export interface Account {
   imagesEnabled: boolean;
   imageLimit: number;
   imageRemaining: number;
+  profile: Profile;
+  /** Paid tokens per day; past it only free models answer. */
+  tokenLimit: number;
+  tokensUsed: number;
+  freeMode: boolean;
+  /** Free models are configured on the server. */
+  freeAvailable: boolean;
 }
 
 export interface ConversationMessage {
@@ -26,6 +34,8 @@ export interface ConversationMessage {
   document?: DocumentSpec;
   /** A generated image shown with the answer. */
   image?: { id: string };
+  /** The answer was written by a free-tier model. */
+  freeModel?: boolean;
   /** Names of the files attached to a question. */
   attachments?: AttachmentNames;
 }
@@ -41,6 +51,10 @@ export interface ChatResult {
   /** Absent on fixed answers, which do not touch the allowances. */
   deepRemaining?: number;
   imageRemaining?: number;
+  freeMode?: boolean;
+  answeredByFreeModel?: boolean;
+  tokensUsed?: number;
+  tokenLimit?: number;
   /** Present when the answer is a generated image. */
   image?: { id: string };
   /** Present when the answer is a document. */
@@ -55,12 +69,36 @@ export interface ManagedUser {
   email: string;
   name: string;
   status: UserStatus;
+  profile: Profile;
   isAdmin: boolean;
   dailyLimit: number;
   deepLimit: number;
   imageLimit: number;
+  tokenLimit: number;
   createdAt: string;
+  todayMessages: number;
+  todayPaidTokens: number;
+  todayImages: number;
+  monthCostMicroUsd: number;
+  monthRequests: number;
+  monthFreeTokens: number;
 }
+
+export interface UsageDay {
+  day: string;
+  requests: number;
+  text: number;
+  deep: number;
+  documents: number;
+  images: number;
+  errors: number;
+  freeModeRequests: number;
+  paidTokens: number;
+  freeTokens: number;
+  costMicroUsd: number;
+}
+
+export type UserChanges = Partial<Pick<ManagedUser, 'status' | 'profile' | 'dailyLimit' | 'deepLimit' | 'imageLimit' | 'tokenLimit'>>;
 
 const KNOWN_ERRORS = [
   'not_signed_in',
@@ -69,6 +107,9 @@ const KNOWN_ERRORS = [
   'not_found',
   'daily_limit_reached',
   'image_limit_reached',
+  'tokens_exhausted',
+  'free_quota_exhausted',
+  'quota_exhausted',
   'service_unavailable',
   'attachments_unavailable',
   'invalid_request',
@@ -125,5 +166,7 @@ export const sendMessage = (
 ) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
-export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number; imageLimit?: number }) =>
+export const fetchUserUsage = (id: number, days = 30) =>
+  request<{ days: UsageDay[] }>(`/admin/users/${id}/usage?days=${days}`).then((body) => body.days);
+export const updateUser = (id: number, changes: UserChanges) =>
   request<void>(`/admin/users/${id}`, 'PATCH', changes);
