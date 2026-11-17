@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/attachments';
 import type { ConversationMessage } from './api';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
 import { Markdown } from './Markdown';
+import { REMINDER_TEXT, reminderAfter } from './reminder';
 
 interface ChatProps {
   messages: ConversationMessage[];
@@ -99,26 +100,33 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
           </p>
         )}
         {messages.map((message, index) => (
-          <article key={index} className={`message message-${message.role}`}>
-            <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
-            {message.document ? (
-              <DocumentView document={message.document} />
-            ) : message.role === 'assistant' ? (
-              <Markdown text={message.content} />
-            ) : (
-              <p>{message.content}</p>
+          <Fragment key={index}>
+            <article className={`message message-${message.role}`}>
+              <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
+              {message.document ? (
+                <DocumentView document={message.document} />
+              ) : message.role === 'assistant' ? (
+                <Markdown text={message.content} />
+              ) : (
+                <p>{message.content}</p>
+              )}
+              {message.attachments && hasAttachments(message.attachments) && (
+                <ul className="attachments" aria-label="Allegati">
+                  {message.attachments.documents.map((name, item) => (
+                    <li key={`document-${item}`}>Documento: {name}</li>
+                  ))}
+                  {message.attachments.images.map((name, item) => (
+                    <li key={`image-${item}`}>Immagine: {name}</li>
+                  ))}
+                </ul>
+              )}
+            </article>
+            {reminderAfter(messages, index) && (
+              <aside className="reminder" role="note">
+                {REMINDER_TEXT}
+              </aside>
             )}
-            {message.attachments && hasAttachments(message.attachments) && (
-              <ul className="attachments" aria-label="Allegati">
-                {message.attachments.documents.map((name, item) => (
-                  <li key={`document-${item}`}>Documento: {name}</li>
-                ))}
-                {message.attachments.images.map((name, item) => (
-                  <li key={`image-${item}`}>Immagine: {name}</li>
-                ))}
-              </ul>
-            )}
-          </article>
+          </Fragment>
         ))}
         {pending && (
           <p role="status" className="muted">

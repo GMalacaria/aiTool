@@ -24,6 +24,7 @@ Early stage — working MVP:
 - files on explicit request only ("fammi un PDF…", "crea un documento Excel…"): the model describes a document (text, lists, tables, bar/line/pie charts, quizzes with answer key) and the app renders it and exports it to PDF and Excel on the device;
 - "Allega": images and PDFs can be attached to a question. They are processed on the device (images downscaled, PDF text extracted, scanned pages turned into images); the extracted text is stored with the conversation, original files and images never are;
 - fixed answers pointing to real services for sensitive topics (never stored);
+- a fixed reminder that this is a tool, not a person, after every 10th question of a conversation;
 - installable as a PWA.
 
 ## Development

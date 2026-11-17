@@ -612,3 +612,13 @@ textarea {
   border: 0;
   border-top: 1px solid var(--border);
 }
+
+/* Periodic reminder that this is a tool */
+
+.reminder {
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
