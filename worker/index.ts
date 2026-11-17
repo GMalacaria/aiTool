@@ -27,6 +27,7 @@ import {
 } from './conversations';
 import type { AppEnv, UserStatus } from './env';
 import { getRouter } from './llm/providers';
+import { AllProvidersFailedError } from './llm/router';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
 import {
   consumeDeepMessage,
@@ -229,6 +230,10 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     console.error('chat failed', error);
     await refundMessage(db, user, day);
     if (deep) await refundDeepMessage(db, user, day);
+    // Only a provider that may not see attachments was left: say so, the user can retry without files.
+    if (error instanceof AllProvidersFailedError && error.attachmentsSkipped) {
+      return c.json({ error: 'attachments_unavailable' }, 503);
+    }
     return c.json({ error: 'service_unavailable' }, 503);
   }
 });

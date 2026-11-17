@@ -19,6 +19,12 @@ export interface Provider {
   temperature?: number;
   /** Extra request fields for `fast` completions, e.g. to switch reasoning off. */
   fastParams?: Record<string, unknown>;
+  /**
+   * Whether the provider may receive the content of files the user attached
+   * (images, extracted document text). False for free tiers, whose terms may
+   * allow training on the data: such providers are skipped for those requests.
+   */
+  acceptsAttachments: boolean;
 }
 
 export interface CompletionOptions {
@@ -27,11 +33,17 @@ export interface CompletionOptions {
   json?: boolean;
   /** A trivial task (e.g. classification): answer as quickly as the provider allows. */
   fast?: boolean;
+  /** The messages carry the content of attached files (also in the history). */
+  containsAttachments?: boolean;
   timeoutMs?: number;
 }
 
 export class AllProvidersFailedError extends Error {
-  constructor(readonly failures: string[]) {
+  constructor(
+    readonly failures: string[],
+    /** Some provider was left out only because it must not receive attachments. */
+    readonly attachmentsSkipped = false,
+  ) {
     super(`All providers failed: ${failures.join('; ')}`);
     this.name = 'AllProvidersFailedError';
   }
@@ -56,10 +68,17 @@ export class ProviderRouter {
 
   async complete(messages: ChatMessage[], options: CompletionOptions): Promise<string> {
     const failures: string[] = [];
+    let attachmentsSkipped = false;
 
     for (const provider of this.providers) {
       if ((this.exhaustedUntil.get(provider.name) ?? 0) > this.now()) {
         failures.push(`${provider.name}: rate limited, skipped`);
+        continue;
+      }
+
+      if (options.containsAttachments && !provider.acceptsAttachments) {
+        failures.push(`${provider.name}: does not accept attachments, skipped`);
+        attachmentsSkipped = true;
         continue;
       }
 
@@ -70,7 +89,7 @@ export class ProviderRouter {
       }
     }
 
-    throw new AllProvidersFailedError(failures);
+    throw new AllProvidersFailedError(failures, attachmentsSkipped);
   }
 
   private async call(provider: Provider, messages: ChatMessage[], options: CompletionOptions): Promise<string> {

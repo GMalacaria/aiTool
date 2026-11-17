@@ -8,8 +8,17 @@ GOOGLE_CLIENT_SECRET=replace-with-your-client-secret
 # Comma-separated emails approved automatically and allowed to manage users.
 ADMIN_EMAILS=you@example.com
 
+# Optional free-tier fallbacks, used when OpenAI fails. Each is enabled by its key.
+# They never receive attached files (their terms may allow training on the data).
+# GROQ_API_KEY=replace-with-your-groq-key
+# GEMINI_API_KEY=replace-with-your-gemini-key
+# GROQ_MODEL=llama-3.3-70b-versatile
+# GEMINI_MODEL=gemini-flash-lite-latest
+
 # Optional: use the local mocks started with `npm run mock` instead of the
 # real services (no keys needed; any value works for the settings above).
 # OPENAI_BASE_URL=http://127.0.0.1:8788/v1
+# To try the fallback: OPENAI_BASE_URL=http://127.0.0.1:8788/down/v1 (always out of quota)
+# plus GROQ_API_KEY=any and GROQ_BASE_URL=http://127.0.0.1:8788/v1
 # GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
 # GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token

@@ -16,7 +16,7 @@ Early stage — working MVP:
 
 - Google sign-in; new accounts wait for an administrator's approval;
 - daily message limit per person;
-- chat through an OpenAI-compatible provider router;
+- chat through an OpenAI-compatible provider router, with optional free-tier fallbacks (Groq, Gemini) when OpenAI fails;
 - every answer goes through a second "anti-sycophancy" review call;
 - "Risposta più approfondita": a per-message option that uses a stronger model, with its own small daily allowance;
 - conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
