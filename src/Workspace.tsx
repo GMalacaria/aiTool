@@ -206,6 +206,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
           freeModel: result.answeredByFreeModel,
           sources: result.sources,
           contextUpdate: result.contextUpdate,
+          media: result.media,
         },
       ]);
       setRemaining(result.remaining);

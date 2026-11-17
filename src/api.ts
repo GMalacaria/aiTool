@@ -1,5 +1,6 @@
 import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
+import type { MediaItem } from '../shared/media';
 import type { AnswerSources } from '../shared/sources';
 import type { ContextSource, ContextUpdate } from '../shared/context';
 
@@ -46,6 +47,8 @@ export interface ConversationMessage {
   sources?: AnswerSources;
   /** The change to the user's context made with this answer. */
   contextUpdate?: ContextUpdate;
+  /** A map or a video shown with the answer. */
+  media?: MediaItem;
 }
 
 export interface ConversationSummary {
@@ -73,6 +76,8 @@ export interface ChatResult {
   sources?: AnswerSources;
   /** Present when the user's context was changed with this answer. */
   contextUpdate?: ContextUpdate;
+  /** Present when the answer shows a map or a video. */
+  media?: MediaItem;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;
