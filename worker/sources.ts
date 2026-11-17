@@ -443,13 +443,15 @@ export async function answerWithSources(
 ): Promise<{ text: string; sources: AnswerSources | null }> {
   const fetchFn = config.fetchFn ?? fetch;
   const found = await searchAnswer(config, messages, options);
-  const reviewed = await options.review(found.text);
-  // A rewrite moves the text: the writer's citation places no longer apply.
-  const citations = reviewed === found.text ? found.citations : [];
-
   const urls = [...new Set(found.citations.map((citation) => citation.url))].slice(0, MAX_WEB_SOURCES);
   const titles = new Map(found.citations.map((citation) => [citation.url, citation.title]));
-  const pages = await Promise.all(urls.map((url) => readPage(url, fetchFn)));
+  // The pages are read while the review runs: neither needs the other.
+  const [reviewed, pages] = await Promise.all([
+    options.review(found.text),
+    Promise.all(urls.map((url) => readPage(url, fetchFn))),
+  ]);
+  // A rewrite moves the text: the writer's citation places no longer apply.
+  const citations = reviewed === found.text ? found.citations : [];
   const candidates: Candidate[] = [
     ...urls.map((url, index): Candidate => ({ item: { kind: 'web', url, title: titles.get(url) ?? url }, content: pages[index] })),
     ...options.documents.map((document): Candidate => ({ item: { kind: 'file', name: document.name }, content: { ok: true, text: document.text } })),

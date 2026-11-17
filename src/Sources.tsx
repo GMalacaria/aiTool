@@ -100,7 +100,7 @@ function UncheckedMarker({ item }: { item?: SourceItem }) {
             )}
           </>
         ) : (
-          'Affermazione non verificata: nessuna fonte la conferma.'
+          'Affermazione non verificata: nessuna fonte leggibile la conferma.'
         )}
       </span>
     </>
