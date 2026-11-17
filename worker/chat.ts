@@ -23,6 +23,8 @@ import {
   STUDENT_INSTRUCTION,
   STUDENT_REVIEW_INSTRUCTION,
   SYSTEM_PROMPT,
+  TITLE_SYSTEM_PROMPT,
+  cleanTitle,
 } from './prompts';
 import type { Profile } from './env';
 import type { UsageMeter } from './meter';
@@ -365,4 +367,21 @@ export async function createDocument(
   const document = parseDocument(raw);
   if (!document) throw new Error('model returned an unusable document');
   return document;
+}
+
+/** A very short title for a new conversation; null if it cannot be made (the caller falls back to the question). */
+export async function generateTitle(router: ProviderRouter, question: string, meter?: UsageMeter): Promise<string | null> {
+  try {
+    const reply = await router.complete(
+      [
+        { role: 'system', content: TITLE_SYSTEM_PROMPT },
+        { role: 'user', content: question.slice(0, 1000) },
+      ],
+      { maxOutputTokens: 60, fast: true, timeoutMs: INTENT_TIMEOUT_MS, meter, purpose: 'title' },
+    );
+    return cleanTitle(reply);
+  } catch (error) {
+    console.warn('title not generated', error);
+    return null;
+  }
 }

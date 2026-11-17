@@ -156,6 +156,16 @@ export const fetchConversations = () =>
 export const fetchConversation = (id: string) =>
   request<ConversationSummary & { messages: ConversationMessage[] }>(`/conversations/${id}`);
 export const deleteConversation = (id: string) => request<void>(`/conversations/${id}`, 'DELETE');
+export const renameConversation = (id: string, title: string) =>
+  request<{ title: string }>(`/conversations/${id}`, 'PATCH', { title }).then((body) => body.title);
+
+export interface SearchResult extends ConversationSummary {
+  /** Excerpt of a matching message; null when only the title matched. */
+  snippet: string | null;
+}
+
+export const searchConversations = (query: string) =>
+  request<{ results: SearchResult[] }>(`/conversations/search?q=${encodeURIComponent(query)}`).then((body) => body.results);
 export const deleteAllConversations = () => request<void>('/conversations', 'DELETE');
 
 export const sendMessage = (

@@ -17,7 +17,7 @@ import {
 import { hasAttachments, toStored } from '../shared/attachments';
 import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
-import { MAX_HISTORY_MESSAGES, parseChatRequest, respond, type ConversationMessage } from './chat';
+import { generateTitle, MAX_HISTORY_MESSAGES, parseChatRequest, respond, type ConversationMessage } from './chat';
 import { generateImage, ImageNotProducedError, imagesEnabled, isFlagged } from './images';
 import {
   deleteAccount,
@@ -27,6 +27,9 @@ import {
   findImage,
   listConversations,
   listMessages,
+  MAX_TITLE_CHARS,
+  renameConversation,
+  searchConversations,
   saveExchange,
 } from './conversations';
 import { PROFILES, type AppEnv, type UserStatus } from './env';
@@ -171,6 +174,22 @@ app.delete('/conversations', requireUser, requireApproved, async (c) => {
   return c.json({ ok: true });
 });
 
+/** Searches titles and message text of the user's conversations. Registered before /:id. */
+app.get('/conversations/search', requireUser, requireApproved, async (c) => {
+  const query = (c.req.query('q') ?? '').trim();
+  if (query.length < 2 || query.length > 100) return c.json({ results: [] });
+  return c.json({ results: await searchConversations(c.env.DB, c.get('user'), query) });
+});
+
+app.patch('/conversations/:id', requireUser, requireApproved, async (c) => {
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as { title?: unknown };
+  const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim() : '';
+  if (!title || title.length > MAX_TITLE_CHARS) return c.json({ error: 'invalid_request' }, 400);
+
+  const renamed = await renameConversation(c.env.DB, c.get('user'), c.req.param('id'), title);
+  return renamed ? c.json({ ok: true, title }) : c.json({ error: 'not_found' }, 404);
+});
+
 app.get('/conversations/:id', requireUser, requireApproved, async (c) => {
   const conversation = await findConversation(c.env.DB, c.get('user'), c.req.param('id'));
   if (!conversation) return c.json({ error: 'not_found' }, 404);
@@ -248,6 +267,11 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     const { attachments } = request;
     const stored = hasAttachments(attachments) ? toStored(attachments) : null;
 
+    // A new conversation gets a short title, made from the question alone while the answer is written.
+    const titlePromise = request.conversationId
+      ? Promise.resolve(null)
+      : generateTitle(getRouter(c.env, 'standard', freeMode), request.message, meter);
+
     const generate = (useDeep: boolean) =>
       respond(
         {
@@ -307,6 +331,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           stored,
           { id: imageId, mimeType: generated.mimeType },
           meter.answeredByFreeModel,
+          await titlePromise,
         );
         storedImageId = null;
       } catch (error) {
@@ -323,8 +348,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     if (!conversation) {
       const free = meter.answeredByFreeModel;
       conversation = result.document
-        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free);
+        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise)
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise);
     }
 
     usageKind = imageId ? 'image' : result.document ? 'document' : deep ? 'deep' : 'text';

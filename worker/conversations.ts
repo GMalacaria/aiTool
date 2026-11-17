@@ -64,6 +64,8 @@ export async function saveExchange(
   image: { id: string; mimeType: string } | null = null,
   /** The answer was written by a free-tier model. */
   freeModel = false,
+  /** Title for a new conversation; defaults to the start of the question. */
+  title: string | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
@@ -73,7 +75,7 @@ export async function saveExchange(
   await db.batch([
     conversationId
       ? db.prepare('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').bind(id, user.id)
-      : db.prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)').bind(id, user.id, titleFrom(question)),
+      : db.prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)').bind(id, user.id, title ?? titleFrom(question)),
     ...(image
       ? [
           db
@@ -125,4 +127,63 @@ export async function findImage(db: D1Database, user: User, id: string): Promise
     .prepare('SELECT mime_type AS mimeType FROM generated_images WHERE id = ? AND user_id = ?')
     .bind(id, user.id)
     .first<{ mimeType: string }>();
+}
+
+export const MAX_TITLE_CHARS = 80;
+
+/** Returns false when the conversation is not the user's. */
+export async function renameConversation(db: D1Database, user: User, id: string, title: string): Promise<boolean> {
+  const result = await db
+    .prepare('UPDATE conversations SET title = ? WHERE id = ? AND user_id = ?')
+    .bind(title, id, user.id)
+    .run();
+  return result.meta.changes > 0;
+}
+
+export interface SearchResult extends ConversationSummary {
+  /** A short excerpt of a matching message, when the match is not only in the title. */
+  snippet: string | null;
+}
+
+const SEARCH_LIMIT = 30;
+const SNIPPET_CHARS = 140;
+
+/** Escapes LIKE wildcards so the user's text is matched literally. */
+function likePattern(query: string): string {
+  return `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+}
+
+export function snippetAround(text: string, query: string): string {
+  // Markdown markers would show up as raw symbols in the excerpt.
+  const flat = text.replace(/[*_`#>|]+/g, '').replace(/\s+/g, ' ').trim();
+  const at = flat.toLowerCase().indexOf(query.toLowerCase());
+  if (at === -1) return flat.slice(0, SNIPPET_CHARS);
+  const start = Math.max(0, at - 40);
+  const excerpt = flat.slice(start, start + SNIPPET_CHARS);
+  return `${start > 0 ? '…' : ''}${excerpt}${start + SNIPPET_CHARS < flat.length ? '…' : ''}`;
+}
+
+/** The user's conversations whose title or messages contain `query` (case-insensitive), newest first. */
+export async function searchConversations(db: D1Database, user: User, query: string): Promise<SearchResult[]> {
+  const pattern = likePattern(query);
+  const { results } = await db
+    .prepare(
+      `SELECT c.id, c.title, c.updated_at AS updatedAt,
+              (SELECT m.content FROM messages m
+                WHERE m.conversation_id = c.id AND m.kind = 'text' AND m.content LIKE ?2 ESCAPE '\\'
+                ORDER BY m.id LIMIT 1) AS matched
+       FROM conversations c
+       WHERE c.user_id = ?1
+         AND (c.title LIKE ?2 ESCAPE '\\'
+              OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.content LIKE ?2 ESCAPE '\\'))
+       ORDER BY c.updated_at DESC, c.rowid DESC
+       LIMIT ?3`,
+    )
+    .bind(user.id, pattern, SEARCH_LIMIT)
+    .all<ConversationSummary & { matched: string | null }>();
+
+  return results.map(({ matched, ...conversation }) => ({
+    ...conversation,
+    snippet: matched ? snippetAround(matched, query) : null,
+  }));
 }
