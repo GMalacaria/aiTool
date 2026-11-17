@@ -59,7 +59,7 @@ Similar existing reference: Noema (pilot project that observes conversations and
 - **No voice output (text-to-speech): it creates a relationship.** Product decision.
 - **No buttons for generated content** (2026-11-16, owner's decision): the UX follows today's chatbots. Images and documents are produced when the message asks for them, never through a dedicated button.
 
-## Verified sources (decided 2026-11-17, in development on `feat/verified-sources`)
+## Verified sources (decided and implemented 2026-11-17, not yet deployed)
 
 Goal: Kern must be reliable, so factual answers show where each fact comes from.
 
@@ -70,6 +70,13 @@ Goal: Kern must be reliable, so factual answers show where each fact comes from.
 - **Costs are the owner's, never the user's** (owner's decision): search and verification do not count against the user's token budget. The Users page shows, per person, how much is spent on sources. An app-wide daily cap on searches protects the monthly budget.
 - **Prototype figures** (10 real Italian questions, 2026-11-17): about 4.3 s for the search and 2.4 s for the verification (≈ +7 s per factual answer); usually 1 search, 17–35 pages consulted, 1–3 cited; ≈ 9,000 input tokens per search (up to 19,000); ≈ $0.01 per search call ($10 per 1,000) plus tokens. Problems found: some sites refuse automated reads (HTTP 403) and PDFs were not parsed, both causing [?] on true facts; the writer adds inline links even when told not to (they are removed, the app adds its own markers).
 - Docs: https://developers.openai.com/api/docs/guides/tools-web-search, https://developers.openai.com/api/docs/pricing
+- **Implementation** (`worker/sources.ts`, `shared/sources.ts`, `src/Sources.tsx`):
+  - The intent classifier has a fourth value, `search`; a failed search falls back to the normal answer without sources. The answer goes through the usual anti-sycophancy review before the check (a rewrite drops the writer's citation places).
+  - Pages are read by the Worker (8 s timeout, one retry on network errors and 5xx; HTML stripped to text, the parts matching the answer kept up to 12,000 characters). **PDFs are not parsed in the Worker** (the free plan allows 10 ms of CPU per request): they are sent to Gemini as `inlineData`, up to 5 MB.
+  - Checker: `gemini-flash-latest` (`GEMINI_VERIFY_MODEL`) with the paid key `GEMINI_IMAGE_API_KEY`, else the free `GEMINI_API_KEY`; attached documents are never sent to the free key (then the answer is shown with the legend marked "verifica non disponibile"). The page text is data: the prompt forbids following instructions in it.
+  - Markers are stored inside the answer as Markdown links (`[1](#source-1)`, `[?](#unverified)`, `[?](#unreadable-1)`), the legend in `messages.sources` (JSON, migration 0009). They are stripped before the answer goes back to a model as history and from search excerpts. The client renders [n] as a link to the page and [?] as a toggletip (`popover="hint"` with `interestfor` and `popovertarget`; falls back to `auto` where `hint` is missing; anchored with `position-area` where supported).
+  - Cost: `usage_events.searches` and `sources_cost_micro_usd` (included in `cost_micro_usd`); tokens of `search` and `verify` calls do not count in `daily_usage.paid_tokens`. Not used in free mode. App-wide cap `SOURCES_DAILY_LIMIT` (default 300 answers with search per day, 0 turns the feature off).
+  - Measured on the real APIs after implementation: 6.5–11.5 s per answer (search, page reads and check), about $0.011–0.013 per answer for search plus check; the intent classifier routed 12 of 12 test messages correctly. quirinale.it refuses automated reads (HTTP 403), so facts cited only from it show [?] with "fonte non leggibile".
 
 ## Models (family use, November 2026 prices — verify)
 
