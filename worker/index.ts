@@ -18,6 +18,7 @@ import { hasAttachments, toStored } from '../shared/attachments';
 import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
 import { MAX_QUESTIONS_PER_CONVERSATION } from '../shared/conversation';
+import { normalizeContext, parseContextUpdate } from '../shared/context';
 import { parseSources } from '../shared/sources';
 import {
   generateTitle,
@@ -43,6 +44,7 @@ import {
   findConversation,
   countQuestions,
   findAnswer,
+  findContextUpdate,
   findImage,
   lastAnswerId,
   listConversations,
@@ -50,6 +52,7 @@ import {
   MAX_TITLE_CHARS,
   renameConversation,
   saveCheckedAnswer,
+  saveContextUpdate,
   searchConversations,
   saveExchange,
 } from './conversations';
@@ -57,6 +60,14 @@ import { PROFILES, type AppEnv, type Env, type UserStatus } from './env';
 import { getRouter, hasFreeProviders, OPENAI_MODELS, OPENAI_PRICES, type Tier } from './llm/providers';
 import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, verifyAnswer, type SourcesConfig } from './sources';
 import { UsageMeter } from './meter';
+import {
+  getContext,
+  listContextVersions,
+  restoreContextVersion,
+  saveContext,
+  setContextPaused,
+  undoContextVersion,
+} from './context';
 import { streaks, usageTotals } from './stats';
 import { AllProvidersFailedError } from './llm/router';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
@@ -151,12 +162,13 @@ function toClientMessage(message: ConversationMessage) {
 
   const freeModel = message.freeModel ? true : undefined;
   const sources = message.sources ? (parseSources(message.sources) ?? undefined) : undefined;
+  const contextUpdate = message.contextUpdate ? (parseContextUpdate(message.contextUpdate) ?? undefined) : undefined;
   const id = message.id;
-  if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId } };
+  if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId }, contextUpdate };
 
   return document
-    ? { id, role: message.role, content: document.title, document, freeModel }
-    : { id, role: message.role, content: message.content, attachments, freeModel, sources };
+    ? { id, role: message.role, content: document.title, document, freeModel, contextUpdate }
+    : { id, role: message.role, content: message.content, attachments, freeModel, sources, contextUpdate };
 }
 
 app.use(requireSameOrigin);
@@ -381,6 +393,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       ? Promise.resolve(null)
       : generateTitle(getRouter(c.env, 'standard', freeMode), request.message, meter);
 
+    // The context is personal: free providers never receive it, so it is not used in free mode.
+    const userContext = freeMode ? null : await getContext(db, user.id);
     const generate = async (useDeep: boolean) =>
       respond(
         {
@@ -391,6 +405,13 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           // Only when the user asked for verified sources: the search makes the answer slower.
           sources: request.verifySources
             ? await sourcesConfig(c.env, db, day, useDeep ? 'deep' : 'standard', freeMode)
+            : undefined,
+          context: userContext
+            ? {
+                content: userContext.content,
+                paused: userContext.paused,
+                save: (content, source, note) => saveContext(db, user.id, content, source, note),
+              }
             : undefined,
           profile: user.profile,
           images: {
@@ -461,6 +482,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           { id: imageId, mimeType: generated.mimeType },
           meter.answeredByFreeModel,
           await titlePromise,
+          null,
+          result.contextUpdate ?? null,
         );
         storedImageId = null;
       } catch (error) {
@@ -477,8 +500,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     if (!conversation) {
       const free = meter.answeredByFreeModel;
       conversation = result.document
-        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null);
+        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise, null, result.contextUpdate ?? null)
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null, result.contextUpdate ?? null);
     }
 
     uploadedImages = [];
@@ -491,6 +514,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       document: result.document,
       image: imageId ? { id: imageId } : undefined,
       sources: result.text !== undefined ? (result.sources ?? undefined) : undefined,
+      contextUpdate: result.contextUpdate,
       deep,
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),
@@ -522,6 +546,54 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     }
     return c.json({ error: 'service_unavailable' }, 503);
   }
+});
+
+// --- User context ------------------------------------------------------------
+// What the user chose to share about themselves. Only the user can read or change it.
+
+app.get('/me/context', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  const [context, versions] = await Promise.all([getContext(c.env.DB, user.id), listContextVersions(c.env.DB, user.id)]);
+  return c.json({ ...context, versions });
+});
+
+/** Edited by hand in Profilo. */
+app.put('/me/context', requireUser, requireApproved, async (c) => {
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as { content?: unknown };
+  const content = typeof body.content === 'string' ? normalizeContext(body.content) : null;
+  if (content === null) return c.json({ error: 'invalid_request' }, 400);
+  const user = c.get('user');
+  const current = await getContext(c.env.DB, user.id);
+  if (content !== current.content) await saveContext(c.env.DB, user.id, content, 'manual', 'Modificato dal Profilo');
+  return c.json({ content });
+});
+
+app.patch('/me/context', requireUser, requireApproved, async (c) => {
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as { paused?: unknown };
+  if (typeof body.paused !== 'boolean') return c.json({ error: 'invalid_request' }, 400);
+  await setContextPaused(c.env.DB, c.get('user').id, body.paused);
+  return c.json({ paused: body.paused });
+});
+
+app.post('/me/context/versions/:id/restore', requireUser, requireApproved, async (c) => {
+  const id = Number(c.req.param('id'));
+  const content = Number.isInteger(id) ? await restoreContextVersion(c.env.DB, c.get('user').id, id) : null;
+  return content === null ? c.json({ error: 'not_found' }, 404) : c.json({ content });
+});
+
+/** "Annulla" under an answer: takes back the context change made with it, if nothing changed since. */
+app.post('/messages/:id/context-undo', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  const id = Number(c.req.param('id'));
+  const update = Number.isInteger(id) ? parseContextUpdate(await findContextUpdate(c.env.DB, user, id)) : null;
+  if (!update) return c.json({ error: 'not_found' }, 404);
+  if (update.undone) return c.json({ contextUpdate: update });
+
+  const restored = await undoContextVersion(c.env.DB, user.id, update.versionId);
+  if (restored === null) return c.json({ error: 'context_changed' }, 409);
+  const undone = { ...update, undone: true };
+  await saveContextUpdate(c.env.DB, id, undone);
+  return c.json({ contextUpdate: undone });
 });
 
 /**

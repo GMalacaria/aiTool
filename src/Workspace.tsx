@@ -9,6 +9,7 @@ import {
   fetchConversations,
   renameConversation,
   sendMessage,
+  undoContextUpdate,
   verifyMessage,
   type Account,
   type ConversationMessage,
@@ -204,6 +205,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
           image: result.image,
           freeModel: result.answeredByFreeModel,
           sources: result.sources,
+          contextUpdate: result.contextUpdate,
         },
       ]);
       setRemaining(result.remaining);
@@ -257,6 +259,19 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     window.setTimeout(() => {
       if (!document.querySelector('dialog[open]')) setInstallOpen(true);
     }, 2500);
+  }
+
+  /** "Annulla" under an answer: 'changed' when the context was modified again since. */
+  async function undoContext(messageId: number): Promise<'done' | 'changed' | 'failed'> {
+    try {
+      const update = await undoContextUpdate(messageId);
+      setMessages((list) => list.map((message) => (message.id === messageId ? { ...message, contextUpdate: update } : message)));
+      return 'done';
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === 'context_changed') return 'changed';
+      handleFailure(cause);
+      return 'failed';
+    }
   }
 
   async function rename(conversation: ConversationSummary, title: string) {
@@ -359,6 +374,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             onSend={send}
             onVerifySources={verifySources}
             onNewChat={startNewChat}
+            onUndoContext={undoContext}
           />
         )}
       </div>

@@ -1,5 +1,6 @@
 import { parseStoredAttachments, type StoredAttachments } from '../shared/attachments';
 import { stripMarkers, type AnswerSources } from '../shared/sources';
+import type { ContextUpdate } from '../shared/context';
 import type { ConversationMessage, MessageKind } from './chat';
 import type { User } from './env';
 
@@ -39,11 +40,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT id, role, content, kind, attachments, imageId, freeModel, sources FROM (
-               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT id, role, content, kind, attachments, imageId, freeModel, sources, contextUpdate FROM (
+               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -69,10 +70,12 @@ export async function saveExchange(
   title: string | null = null,
   /** Verified sources of a text answer. */
   sources: AnswerSources | null = null,
+  /** The context change made with the answer. */
+  contextUpdate: ContextUpdate | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
-    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model, sources, context_update) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
 
   await db.batch([
@@ -97,8 +100,18 @@ export async function saveExchange(
           )
           .bind(attached.id ?? '', user.id, id, attached.mimeType ?? 'image/jpeg', attached.name),
       ),
-    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0, null),
-    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null, freeModel ? 1 : 0, sources ? JSON.stringify(sources) : null),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0, null, null),
+    insertMessage.bind(
+      id,
+      'assistant',
+      answer,
+      answerKind,
+      null,
+      image?.id ?? null,
+      freeModel ? 1 : 0,
+      sources ? JSON.stringify(sources) : null,
+      contextUpdate ? JSON.stringify(contextUpdate) : null,
+    ),
   ]);
 
   const conversation = await findConversation(db, user, id);
@@ -146,6 +159,22 @@ export async function findAnswer(db: D1Database, user: User, id: number): Promis
     )
     .bind(id, user.id)
     .first<AnswerToCheck>();
+}
+
+/** An answer of the user's with the context change made with it; null when it is not theirs. */
+export async function findContextUpdate(db: D1Database, user: User, messageId: number): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT m.context_update AS contextUpdate FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = ? AND c.user_id = ?`,
+    )
+    .bind(messageId, user.id)
+    .first<{ contextUpdate: string | null }>();
+  return row?.contextUpdate ?? null;
+}
+
+export async function saveContextUpdate(db: D1Database, messageId: number, update: ContextUpdate): Promise<void> {
+  await db.prepare('UPDATE messages SET context_update = ? WHERE id = ?').bind(JSON.stringify(update), messageId).run();
 }
 
 /** Stores the checked answer: the text with markers and its sources. */
