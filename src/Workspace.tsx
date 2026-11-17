@@ -15,10 +15,12 @@ import {
   type ConversationSummary,
 } from './api';
 import { Chat } from './Chat';
+import { markOffered, useInstallMode, wasOffered } from './install';
 import { Profile } from './pages/Profile';
 import { Settings } from './pages/Settings';
 import { ConfirmDialog, RenameDialog } from './ui/ConversationDialogs';
 import { NewChatIcon, SidebarIcon } from './ui/icons';
+import { InstallDialog } from './ui/InstallDialog';
 import { SearchDialog } from './ui/SearchDialog';
 import { Sidebar, type View } from './ui/Sidebar';
 import { Users } from './Users';
@@ -76,6 +78,8 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [renaming, setRenaming] = useState<ConversationSummary | null>(null);
   const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
+  const installMode = useInstallMode();
+  const [installOpen, setInstallOpen] = useState(false);
 
   /** Shows the error, or leaves the workspace when the session is no longer valid. */
   const handleFailure = useCallback(
@@ -208,6 +212,8 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       // The next request already runs on free models once the budget is passed.
       if (result.tokensUsed !== undefined && result.tokensUsed >= account.tokenLimit) setFreeMode(true);
 
+      offerInstallOnce();
+
       const saved = result.conversation;
       if (saved) {
         setActiveId(saved.id);
@@ -238,6 +244,18 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       handleFailure(cause);
       return false;
     }
+  }
+
+  /**
+   * After the first answer, propose installation once per device. A short delay
+   * lets the answer appear first; nothing opens over another dialog.
+   */
+  function offerInstallOnce() {
+    if (installMode === null || wasOffered()) return;
+    markOffered();
+    window.setTimeout(() => {
+      if (!document.querySelector('dialog[open]')) setInstallOpen(true);
+    }, 2500);
   }
 
   async function rename(conversation: ConversationSummary, title: string) {
@@ -293,6 +311,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
         onSearch={() => setSearchOpen(true)}
         onNavigate={navigate}
         onSignOut={onSignOut}
+        onInstall={installMode ? () => setInstallOpen(true) : undefined}
         onHide={hideSidebar}
       />
       {overlayOpen && <div className="sidebar-scrim" aria-hidden="true" onClick={closeOverlay} />}
@@ -342,6 +361,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
         )}
       </div>
 
+      <InstallDialog open={installOpen} mode={installMode} onClose={() => setInstallOpen(false)} />
       <SearchDialog open={searchOpen} onOpenConversation={(id) => void openConversation(id)} onClose={() => setSearchOpen(false)} />
       <RenameDialog conversation={renaming} onRename={(conversation, title) => void rename(conversation, title)} onClose={() => setRenaming(null)} />
       <ConfirmDialog

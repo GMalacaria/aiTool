@@ -17,6 +17,8 @@ interface SidebarProps {
   onSearch: () => void;
   onNavigate: (view: View) => void;
   onSignOut: () => void;
+  /** Present when Kern can be installed on this device. */
+  onInstall?: () => void;
   /** Hides the sidebar (collapses it on wide screens, closes the overlay on phones). */
   onHide: () => void;
 }
@@ -35,6 +37,7 @@ export function Sidebar({
   onSearch,
   onNavigate,
   onSignOut,
+  onInstall,
   onHide,
 }: SidebarProps) {
   const menuId = useId();
@@ -122,6 +125,11 @@ export function Sidebar({
           {account.isAdmin && (
             <button type="button" onClick={fromMenu(() => onNavigate('users'))}>
               Utenti
+            </button>
+          )}
+          {onInstall && (
+            <button type="button" onClick={fromMenu(onInstall)}>
+              Installa l'app
             </button>
           )}
           <hr />

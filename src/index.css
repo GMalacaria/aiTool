@@ -421,6 +421,17 @@ textarea {
   justify-content: flex-end;
 }
 
+.install-modal p {
+  margin: 0;
+}
+
+.install-steps {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
 .search-modal {
   width: min(36rem, calc(100vw - 2rem));
 }
