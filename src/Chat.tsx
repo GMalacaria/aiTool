@@ -46,6 +46,15 @@ const LOADING = [
   'Preparazione della risposta',
 ] as const;
 
+/** With "Fonti" on, the wait also says that sources are being checked (the dots follow the text). */
+const LOADING_WITH_SOURCES = [
+  'Richiesta in corso',
+  'Recupero delle informazioni',
+  'Verifica delle fonti in corso',
+  'Verifica dei contenuti',
+  'Preparazione della risposta',
+] as const;
+
 type AnswerMode = 'normal' | 'deep';
 
 /** The "Fonti" choice is remembered on this device. */
@@ -59,10 +68,10 @@ function readVerifyChoice(): boolean {
   }
 }
 
-function Loading() {
+function Loading({ withSources }: { withSources: boolean }) {
   return (
     <div className="loading" role="status">
-      <RotatingText phrases={LOADING} interval={2200} />
+      <RotatingText phrases={withSources ? LOADING_WITH_SOURCES : LOADING} interval={2200} />
       <span className="loading-dots" aria-hidden="true">
         <span />
         <span />
@@ -398,7 +407,7 @@ export function Chat({
               )}
             </Fragment>
           ))}
-          {pending && <Loading />}
+          {pending && <Loading withSources={verifySources} />}
           <div ref={endRef} />
         </div>
       </main>
