@@ -1011,26 +1011,170 @@ textarea {
   font-size: 0.9rem;
 }
 
-/* Generated images */
+/* Generated images: preview with download and share icons, full-screen viewer */
 
 .generated-image {
   display: grid;
   gap: 0.4rem;
+  justify-items: start;
   margin: 0;
 }
 
-.generated-image img {
-  display: block;
+.image-preview {
+  position: relative;
   width: 100%;
   max-width: 32rem;
-  height: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 0.4rem;
+  border-radius: 0.6rem;
   background: var(--surface);
 }
 
-.generated-image a {
-  color: var(--accent);
+.image-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.image-open img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.image-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .image-open:hover img {
+    filter: brightness(1.06);
+  }
+
+  .image-preview:hover {
+    box-shadow: 0 0.4rem 1.2rem rgb(0 0 0 / 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .image-open img,
+  .image-preview {
+    transition:
+      transform 0.25s ease,
+      filter 0.25s ease,
+      box-shadow 0.25s ease;
+  }
+
+  @media (hover: hover) {
+    .image-open:hover img {
+      transform: scale(1.03);
+    }
+  }
+}
+
+.image-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.image-preview .image-actions {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+}
+
+/* Always readable over any picture, in light and dark mode. */
+.image-action {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.image-action:hover {
+  background: rgb(0 0 0 / 0.75);
+}
+
+.image-action:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.image-viewer {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgb(0 0 0 / 0.92);
+  color: #fff;
+}
+
+.image-viewer[open] {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+/* Both rules are needed so scrolling over the backdrop or in the dialog does not scroll the page. */
+.image-viewer:modal {
+  overscroll-behavior: contain;
+}
+
+.image-viewer::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(0 0 0 / 0.92);
+}
+
+.image-viewer-stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem 0;
+  cursor: zoom-out;
+}
+
+.image-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 0.4rem;
+  cursor: default;
+}
+
+.image-viewer-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.image-viewer-label {
+  margin: 0;
+  color: rgb(255 255 255 / 0.75);
+  font-size: 0.85rem;
+}
+
+.image-viewer .image-action {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.image-viewer .image-action:hover {
+  background: rgb(255 255 255 / 0.26);
 }
 
 .user-head {

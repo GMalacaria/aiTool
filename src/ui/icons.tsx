@@ -94,3 +94,15 @@ export const ReasonIcon = (props: IconProps) => (
     <path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1v.1h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z" />
   </Svg>
 );
+
+export const DownloadIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14" />
+  </Svg>
+);
+
+export const ShareIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 15V4M8 7.5l4-4 4 4M7.5 10.5H6a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7.5a1 1 0 0 0-1-1h-1.5" />
+  </Svg>
+);
