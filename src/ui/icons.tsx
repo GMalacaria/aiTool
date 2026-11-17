@@ -86,3 +86,11 @@ export const VerifiedIcon = (props: IconProps) => (
     <path d="m9 12 2.2 2.2L15.5 10" />
   </Svg>
 );
+
+/** A light bulb: the answer type (normal or reasoned). */
+export const ReasonIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M9.5 18h5M10.5 21h3" />
+    <path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1v.1h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z" />
+  </Svg>
+);

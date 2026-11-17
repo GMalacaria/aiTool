@@ -6,7 +6,7 @@ import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
-import { CloseIcon, PlusIcon, SendIcon, VerifiedIcon } from './ui/icons';
+import { CloseIcon, PlusIcon, ReasonIcon, SendIcon, VerifiedIcon } from './ui/icons';
 import { RotatingText } from './ui/RotatingText';
 
 interface ChatProps {
@@ -292,19 +292,24 @@ export function Chat({
             aria-pressed={verifySources}
             aria-describedby="verify-hint"
             onClick={toggleVerify}
+            title="Verifica delle fonti"
             disabled={limitReached}
           >
             <VerifiedIcon size={16} />
-            <span>Fonti</span>
+            <span className="composer-label">Fonti</span>
           </button>
 
           <label htmlFor="answer-mode" className="visually-hidden">
             Tipo di risposta
           </label>
-          <span className="composer-mode-wrap">
+          <span className="composer-mode-wrap" data-deep={deep || undefined}>
+            <span className="composer-mode-icon">
+              <ReasonIcon size={18} />
+            </span>
             <select
               id="answer-mode"
               className="composer-mode"
+              title="Tipo di risposta"
               value={deep ? 'deep' : 'normal'}
               onChange={(event) => setMode(event.target.value as AnswerMode)}
               disabled={limitReached}

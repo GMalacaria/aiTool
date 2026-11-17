@@ -1475,6 +1475,12 @@ select {
   color: var(--accent);
 }
 
+/* The focus ring sits on the button's edge (over the accent border when on), not around it. */
+.composer-toggle:focus-visible,
+.composer-mode:focus-visible {
+  outline-offset: -1px;
+}
+
 .composer-toggle:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -1520,6 +1526,11 @@ select {
   cursor: pointer;
 }
 
+/* The light bulb replaces the text only on narrow windows. */
+.composer-mode-icon {
+  display: none;
+}
+
 .composer-mode:disabled {
   cursor: not-allowed;
 }
@@ -1535,6 +1546,77 @@ select {
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
+}
+
+/* Narrow windows: the text gets a full line of its own (room for the placeholder);
+   attach, "Fonti", answer type and send sit on the line below. The signed-out
+   composer has no options and keeps one line. */
+@media (max-width: 48rem) {
+  .composer-row:has(.composer-mode-wrap) {
+    flex-wrap: wrap;
+    row-gap: 0.15rem;
+  }
+
+  .composer-row:has(.composer-mode-wrap) .composer-input {
+    order: -1;
+    flex-basis: 100%;
+    padding-inline: 0.6rem;
+  }
+
+  .composer-row:has(.composer-mode-wrap) .send-button {
+    margin-left: auto;
+  }
+
+  /* Icons only: the labels stay for screen readers. */
+  .composer-toggle {
+    position: relative;
+    justify-content: center;
+    width: 2.4rem;
+    padding: 0;
+  }
+
+  .composer-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The native select stays (and opens the system picker) but shows only the light bulb. */
+  .composer-mode-icon {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  .composer-mode-wrap::after {
+    display: none;
+  }
+
+  .composer-mode {
+    width: 2.4rem;
+    padding: 0;
+    border: 1px solid transparent;
+    color: transparent;
+  }
+
+  .composer-mode option {
+    color: var(--text);
+  }
+
+  .composer-mode-wrap[data-deep] .composer-mode {
+    border-color: var(--accent);
+    background: var(--selected);
+  }
+
+  .composer-mode-wrap[data-deep] .composer-mode-icon {
+    color: var(--accent);
+  }
 }
 
 /* Touch screens and narrow windows get the send button; on a keyboard Enter sends. */
