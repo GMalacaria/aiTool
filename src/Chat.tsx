@@ -240,19 +240,22 @@ export function Chat({
           <label htmlFor="answer-mode" className="visually-hidden">
             Tipo di risposta
           </label>
-          <select
-            id="answer-mode"
-            className="composer-mode"
-            value={deep ? 'deep' : 'normal'}
-            onChange={(event) => setMode(event.target.value as AnswerMode)}
-            disabled={limitReached}
-          >
-            <option value="normal">Normale</option>
-            <option value="deep" disabled={!deepAvailable}>
-              Ragiona {deepRemaining}/{deepLimit}
-            </option>
-          </select>
+          <span className="composer-mode-wrap">
+            <select
+              id="answer-mode"
+              className="composer-mode"
+              value={deep ? 'deep' : 'normal'}
+              onChange={(event) => setMode(event.target.value as AnswerMode)}
+              disabled={limitReached}
+            >
+              <option value="normal">Normale</option>
+              <option value="deep" disabled={!deepAvailable}>
+                Ragiona {deepRemaining}/{deepLimit}
+              </option>
+            </select>
+          </span>
 
+          {/* On a keyboard Enter sends; the button is shown on touch screens and narrow windows. */}
           <button type="submit" className="send-button" aria-label="Invia" title="Invia" disabled={cannotSend}>
             <SendIcon />
           </button>

@@ -1256,18 +1256,49 @@ select {
   outline: none;
 }
 
+.composer-mode-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text);
+}
+
+/* Own chevron, with room on its right, drawn in the text colour of either scheme. */
+.composer-mode-wrap::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  translate: 0 -50%;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+}
+
 .composer-mode {
+  appearance: none;
   width: auto;
-  padding: 0.35rem 0.5rem;
+  /* Same height as the send button. */
+  height: 2.4rem;
+  padding: 0 2.25rem 0 1rem;
   border: 0;
   border-radius: 999px;
   background: var(--surface);
   color: var(--text);
   font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.composer-mode:disabled {
+  cursor: not-allowed;
 }
 
 .send-button {
-  display: inline-grid;
+  display: none;
+  flex-shrink: 0;
   place-items: center;
   width: 2.4rem;
   height: 2.4rem;
@@ -1276,6 +1307,13 @@ select {
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
+}
+
+/* Touch screens and narrow windows get the send button; on a keyboard Enter sends. */
+@media (pointer: coarse), (max-width: 48rem) {
+  .send-button {
+    display: inline-grid;
+  }
 }
 
 .send-button:disabled {
