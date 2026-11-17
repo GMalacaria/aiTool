@@ -7,6 +7,8 @@
 //   draft starts with a compliment so the review pass has something to fix.
 // - Review calls answer "OK", or strip the compliment from the draft.
 // - A question containing "errore429" makes the mock answer HTTP 429.
+// - Use http://127.0.0.1:8788/down/v1 as a base URL to simulate a provider out of quota,
+//   e.g. OPENAI_BASE_URL=.../down/v1 with GROQ_BASE_URL=.../v1 to test the fallback.
 //
 // Google sign-in — GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
 //                  GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token
@@ -35,8 +37,14 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-function chatCompletion(res, raw) {
-  const { messages = [] } = JSON.parse(raw || '{}');
+function chatCompletion(res, raw, url) {
+  // Anything under /down/ simulates a provider that is out of quota.
+  if (url.pathname.startsWith('/down/')) {
+    json(res, 429, { error: { message: 'mock quota exhausted' } }, { 'Retry-After': '30' });
+    return;
+  }
+
+  const { messages = [], model = 'mock' } = JSON.parse(raw || '{}');
   const system = messages.find((message) => message.role === 'system')?.content ?? '';
   const last = messages.at(-1)?.content ?? '';
   const isReview = system.startsWith('You review');
@@ -50,7 +58,7 @@ function chatCompletion(res, raw) {
     return;
   } else {
     const turns = messages.filter((message) => message.role === 'user').length;
-    content = `${last.includes('lusinga') ? COMPLIMENT : ''}[mock, domanda ${turns} della chat] Risposta a: ${last}`;
+    content = `${last.includes('lusinga') ? COMPLIMENT : ''}[mock ${model}, domanda ${turns} della chat] Risposta a: ${last}`;
   }
 
   console.log(`${isReview ? 'review' : 'draft '} -> ${content}`);
@@ -104,7 +112,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
 
   try {
-    if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) return chatCompletion(res, await readBody(req));
+    if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) return chatCompletion(res, await readBody(req), url);
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') return authorizePage(res, url);
     if (req.method === 'GET' && url.pathname === '/oauth/continue') return authorizeContinue(res, url);
     if (req.method === 'POST' && url.pathname === '/oauth/token') return token(res, await readBody(req));

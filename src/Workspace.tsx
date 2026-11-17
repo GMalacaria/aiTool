@@ -27,6 +27,8 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_request: 'Richiesta non valida.',
   not_found: 'Conversazione non trovata.',
   service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
+  attachments_unavailable:
+    'In questo momento gli allegati non possono essere letti. Riprova più tardi oppure invia la domanda senza allegati.',
 };
 
 export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {

@@ -320,6 +320,27 @@ describe('attachments in model messages', () => {
     expect(callsWith(REVIEW_SYSTEM_PROMPT)[0][0][1].content).not.toContain('Body');
   });
 
+  it('flags requests whose messages carry attachment content, also from the history', async () => {
+    const withHistory = fakeRouters({ draft: 'Date.' });
+    await respond(
+      withHistory.routers,
+      [
+        { role: 'user', content: 'Summarise', kind: 'text', attachments: { documents: [{ name: 'a.pdf', text: 'Body' }], images: [] } },
+        assistant('Summary.'),
+      ],
+      'And the date?',
+    );
+    expect(withHistory.draftComplete.mock.calls[0][1].containsAttachments).toBe(true);
+
+    const withNew = fakeRouters({ draft: 'Summary.' });
+    await respond(withNew.routers, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Body' }], images: [] });
+    expect(withNew.draftComplete.mock.calls[0][1].containsAttachments).toBe(true);
+
+    const plain = fakeRouters({ draft: 'Rome.' });
+    await respond(plain.routers, [user('Hi'), assistant('Hello.')], 'Capital?');
+    expect(plain.draftComplete.mock.calls[0][1].containsAttachments).toBe(false);
+  });
+
   it('tells the reviewer which files were attached, without their content', async () => {
     const { routers, callsWith } = fakeRouters({ draft: 'Summary.' });
     await respond(routers, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Secret body' }], images: [] });

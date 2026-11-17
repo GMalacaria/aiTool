@@ -139,6 +139,11 @@ function reviewQuestion(question: string, attachments: Attachments): string {
   return `${question}\n\n[The user attached: ${attachmentNames(attachments).join(', ')}]`;
 }
 
+/** True when the model will see the content of attached files, now or from earlier messages. */
+function usesAttachments(history: ConversationMessage[], attachments: Attachments): boolean {
+  return hasAttachments(attachments) || truncateHistory(history).some((message) => message.attachments !== null);
+}
+
 function attachmentNames(attachments: Attachments): string[] {
   return [...attachments.documents.map((document) => document.name), ...attachments.images.map((image) => image.name)];
 }
@@ -220,6 +225,7 @@ function draftText(
   return routers.draft.complete(buildMessages(systemPrompt, history, question, attachments, 'text'), {
     maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
     timeoutMs: routers.deep ? LONG_TIMEOUT_MS : undefined,
+    containsAttachments: usesAttachments(history, attachments),
   });
 }
 
@@ -255,6 +261,7 @@ export async function createDocument(
     maxOutputTokens: MAX_DOCUMENT_OUTPUT_TOKENS,
     json: true,
     timeoutMs: LONG_TIMEOUT_MS,
+    containsAttachments: usesAttachments(history, attachments),
   });
 
   const document = parseDocument(raw);

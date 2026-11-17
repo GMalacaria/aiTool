@@ -59,6 +59,7 @@ const KNOWN_ERRORS = [
   'not_found',
   'daily_limit_reached',
   'service_unavailable',
+  'attachments_unavailable',
   'invalid_request',
 ] as const;
 

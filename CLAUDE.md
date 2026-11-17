@@ -72,6 +72,7 @@ Rules:
 - Prefer paid plans that do not use data for training; verify the terms.
 - Avoid providers with data outside the EU without guarantees (e.g. DeepSeek), since users are family members, including teenagers.
 - The multi-provider router also protects against price changes.
+- **Fallbacks implemented 2026-11-17** (`worker/llm/providers.ts`): Groq (`llama-3.3-70b-versatile`) and Gemini (`gemini-flash-lite-latest`) through their OpenAI-compatible endpoints, each enabled only if its secret (`GROQ_API_KEY`, `GEMINI_API_KEY`) is set; models and endpoints can be overridden (`*_MODEL`, `*_BASE_URL`). Order: OpenAI, Groq, Gemini. They serve only the standard tier (never the in-depth answers), and **never receive attached files** (images, extracted document text, also from earlier messages), because free tiers may train on the data and colleagues' conversations can hold private documents; such requests fail with a clear message while OpenAI is unavailable. Model ids are defaults to verify against the provider consoles. Not yet tried against the real providers.
 
 ## MVP decisions (confirmed 2026-11-16)
 

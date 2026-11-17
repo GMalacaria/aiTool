@@ -7,6 +7,7 @@ const provider = (name: string, overrides: Partial<Provider> = {}): Provider => 
   model: `${name}-model`,
   apiKey: `${name}-key`,
   maxTokensParam: 'max_tokens',
+  acceptsAttachments: true,
   ...overrides,
 });
 
@@ -87,10 +88,33 @@ describe('ProviderRouter', () => {
     expect(bodyOf(1)).not.toHaveProperty('reasoning_effort');
   });
 
+  it('skips providers that must not receive attachments', async () => {
+    const fetchFn = vi.fn(async (url: string) =>
+      url.startsWith('https://a.test') ? new Response('down', { status: 500 }) : completion('from c'),
+    );
+    const router = new ProviderRouter(
+      [provider('a'), provider('b', { acceptsAttachments: false }), provider('c')],
+      fetchFn as unknown as typeof fetch,
+    );
+
+    await expect(router.complete(messages, { ...options, containsAttachments: true })).resolves.toBe('from c');
+    expect(fetchFn.mock.calls.map(([url]) => new URL(url).hostname)).toEqual(['a.test', 'c.test']);
+
+    // Without attachments the free-tier provider is used.
+    fetchFn.mockClear();
+    const onlyB = new ProviderRouter([provider('b', { acceptsAttachments: false })], fetchFn as unknown as typeof fetch);
+    await expect(onlyB.complete(messages, options)).resolves.toBe('from c');
+    const refused = await onlyB.complete(messages, { ...options, containsAttachments: true }).catch((error) => error);
+    expect(refused).toBeInstanceOf(AllProvidersFailedError);
+    expect(refused.attachmentsSkipped).toBe(true);
+  });
+
   it('throws when every provider fails', async () => {
     const fetchFn = vi.fn(async () => new Response('boom', { status: 500 }));
     const router = new ProviderRouter([provider('a'), provider('b')], fetchFn as unknown as typeof fetch);
 
-    await expect(router.complete(messages, options)).rejects.toBeInstanceOf(AllProvidersFailedError);
+    const failure = await router.complete(messages, options).catch((error) => error);
+    expect(failure).toBeInstanceOf(AllProvidersFailedError);
+    expect(failure.attachmentsSkipped).toBe(false);
   });
 });
