@@ -12,23 +12,26 @@ Success metric: **question solved, chat closed**.
 
 ## Status
 
-Early stage — working MVP:
+Early stage — working MVP, used by one family (no plan to open it to the public for now). Deployed on Cloudflare Workers.
 
-- Google sign-in; new accounts wait for an administrator's approval;
+- Google sign-in; new accounts wait for an administrator's approval; signed-out visitors see the chat with an anonymous sidebar, and trying to use it asks them to sign in;
+- ChatGPT-style sidebar: chat search, rename and delete, account menu (Profilo, Impostazioni, Utenti for administrators), light/dark theme;
 - daily message limit per person;
 - chat through an OpenAI-compatible provider router, with optional free-tier fallbacks (Groq, Gemini) when OpenAI fails;
 - every answer goes through a second "anti-sycophancy" review call;
 - "Risposta più approfondita": a per-message option that uses a stronger model, with its own small daily allowance;
 - conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
 - answers formatted in Markdown (tables, lists, code blocks) and shown in the chat;
-- images on explicit request ("genera un'immagine di…"), checked by a content filter, kept per account and deletable with the chat;
+- images on explicit request ("genera un'immagine di…") and edits of attached or generated images ("rendila in bianco e nero"), checked by a content filter, kept per account and deletable with the chat;
 - files on explicit request only ("fammi un PDF…", "crea un documento Excel…"): the model describes a document (text, lists, tables, bar/line/pie charts, quizzes with answer key) and the app renders it and exports it to PDF and Excel on the device;
-- "Allega": images and PDFs can be attached to a question. They are processed on the device (images downscaled, PDF text extracted, scanned pages turned into images); the extracted text is stored with the conversation, original files and images never are;
+- "Allega": images and PDFs can be attached to a question. They are processed on the device (images downscaled, PDF text extracted, scanned pages turned into images); the extracted PDF text and the attached images are stored with the conversation (so they can be asked about and edited later), the original PDF files never are;
 - fixed answers pointing to real services for sensitive topics (never stored);
 - per-user daily budgets (messages, in-depth answers, images, paid tokens) with a usage and cost log; past the token budget, answers come from free models and the user is told;
 - two profiles: professional, and student (a tutor that guides to the solution instead of giving it);
 - a fixed reminder that this is a tool, not a person, after every 10th question of a conversation;
 - installable as a PWA.
+
+In development: **verified sources** — factual answers searched on the web, each fact marked with a numbered source (or `[?]` when no source confirms it) and checked by a second, independent model.
 
 ## Development
 
@@ -58,7 +61,7 @@ The repository is public for transparency, but external contributions are not ac
 
 Workflow:
 
-- `main` is protected; changes land only through pull requests from development branches (`feat/…`, `fix/…`, `chore/…`, `docs/…`).
+- `main` is protected; changes land only through pull requests from development branches (`feat/…`, `fix/…`, `chore/…`, `docs/…`), merged and deployed by the owner.
 - Everything in the repository is written in English. User-facing UI copy is Italian.
 
 ## License
