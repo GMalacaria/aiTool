@@ -2,7 +2,7 @@
  * Collects what one chat request used: tokens per model call (paid or free),
  * images and the estimated cost. Nothing about the content is kept.
  */
-export type CallPurpose = 'intent' | 'draft' | 'review' | 'document' | 'plan';
+export type CallPurpose = 'intent' | 'draft' | 'review' | 'document' | 'plan' | 'title';
 
 export interface UsageRecord {
   purpose: CallPurpose;

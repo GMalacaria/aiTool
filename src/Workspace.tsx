@@ -7,12 +7,18 @@ import {
   deleteConversation,
   fetchConversation,
   fetchConversations,
+  renameConversation,
   sendMessage,
   type Account,
   type ConversationMessage,
   type ConversationSummary,
 } from './api';
 import { Chat } from './Chat';
+import { Settings } from './pages/Settings';
+import { ConfirmDialog, RenameDialog } from './ui/ConversationDialogs';
+import { NewChatIcon, SidebarIcon } from './ui/icons';
+import { SearchDialog } from './ui/SearchDialog';
+import { Sidebar, type View } from './ui/Sidebar';
 import { Users } from './Users';
 
 interface WorkspaceProps {
@@ -36,6 +42,18 @@ const ERROR_TEXT: Record<string, string> = {
     'In questo momento gli allegati non possono essere letti. Riprova più tardi oppure invia la domanda senza allegati.',
 };
 
+/** Below this width the sidebar is an overlay instead of a column. */
+const NARROW = '(max-width: 48rem)';
+const COLLAPSED_KEY = 'aitool.sidebarCollapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -47,8 +65,14 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   const [freeMode, setFreeMode] = useState(account.freeMode);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'chat' | 'users'>('chat');
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [view, setView] = useState<View>('chat');
+  /** Wide screens: the user can collapse the sidebar (remembered on this device). */
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  /** Narrow screens: the sidebar is an overlay, closed by default. */
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [renaming, setRenaming] = useState<ConversationSummary | null>(null);
+  const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
 
   /** Shows the error, or leaves the workspace when the session is no longer valid. */
   const handleFailure = useCallback(
@@ -78,18 +102,55 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     };
   }, [handleFailure]);
 
+  // Ctrl+K / Cmd+K opens the search, as in common chat apps.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const isNarrow = () => window.matchMedia(NARROW).matches;
+  const sidebarVisible = isNarrow() ? overlayOpen : !collapsed;
+
+  function setCollapsedRemembered(value: boolean) {
+    setCollapsed(value);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, value ? '1' : '0');
+    } catch {
+      // Not remembered: the choice still applies until the page is reloaded.
+    }
+  }
+
+  function showSidebar() {
+    if (isNarrow()) setOverlayOpen(true);
+    else setCollapsedRemembered(false);
+  }
+
+  function hideSidebar() {
+    if (isNarrow()) setOverlayOpen(false);
+    else setCollapsedRemembered(true);
+  }
+
+  /** After choosing something in the overlay, get it out of the way. */
+  const closeOverlay = () => setOverlayOpen(false);
+
   function startNewChat() {
     setActiveId(null);
     setMessages([]);
     setError(null);
     setView('chat');
-    setPanelOpen(false);
+    closeOverlay();
   }
 
   async function openConversation(id: string) {
     setError(null);
     setView('chat');
-    setPanelOpen(false);
+    closeOverlay();
     try {
       const conversation = await fetchConversation(id);
       setActiveId(conversation.id);
@@ -97,6 +158,11 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     } catch (cause) {
       handleFailure(cause);
     }
+  }
+
+  function navigate(next: View) {
+    setView(next);
+    closeOverlay();
   }
 
   /** Returns false when the message was not sent, so the form can give it back. */
@@ -118,13 +184,17 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
 
     try {
       const result = await sendMessage(activeId, content, attachments, deep);
-      setMessages([...previous, question, {
+      setMessages([
+        ...previous,
+        question,
+        {
           role: 'assistant',
           content: result.answer,
           document: result.document,
           image: result.image,
           freeModel: result.answeredByFreeModel,
-        },]);
+        },
+      ]);
       setRemaining(result.remaining);
       if (result.deepRemaining !== undefined) setDeepRemaining(result.deepRemaining);
       if (result.imageRemaining !== undefined) setImageRemaining(result.imageRemaining);
@@ -150,8 +220,16 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     }
   }
 
-  async function removeConversation(conversation: ConversationSummary) {
-    if (!window.confirm(`Eliminare la conversazione "${conversation.title}"? L'operazione non si può annullare.`)) return;
+  async function rename(conversation: ConversationSummary, title: string) {
+    try {
+      const saved = await renameConversation(conversation.id, title);
+      setConversations((list) => list.map((item) => (item.id === conversation.id ? { ...item, title: saved } : item)));
+    } catch (cause) {
+      handleFailure(cause);
+    }
+  }
+
+  async function remove(conversation: ConversationSummary) {
     try {
       await deleteConversation(conversation.id);
       setConversations((list) => list.filter((item) => item.id !== conversation.id));
@@ -162,18 +240,17 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   async function removeAllConversations() {
-    if (!window.confirm("Eliminare tutta la cronologia? L'operazione non si può annullare.")) return;
     try {
       await deleteAllConversations();
       setConversations([]);
-      startNewChat();
+      setActiveId(null);
+      setMessages([]);
     } catch (cause) {
       handleFailure(cause);
     }
   }
 
   async function removeAccount() {
-    if (!window.confirm("Eliminare l'account e tutte le conversazioni? L'operazione non si può annullare.")) return;
     try {
       await deleteAccount();
       onSignedOut();
@@ -183,89 +260,49 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   }
 
   return (
-    <div className="workspace">
-      <aside className={`panel${panelOpen ? ' panel-open' : ''}`} aria-label="Cronologia e account">
-        <div className="panel-top">
-          <button type="button" className="button-primary" onClick={startNewChat}>
-            Nuova chat
-          </button>
-          <button type="button" className="panel-close" onClick={() => setPanelOpen(false)}>
-            Chiudi
-          </button>
-        </div>
-
-        <nav className="history" aria-label="Cronologia">
-          {conversations.length === 0 && <p className="muted">Nessuna conversazione salvata.</p>}
-          <ul>
-            {conversations.map((conversation) => (
-              <li key={conversation.id} className={conversation.id === activeId ? 'history-active' : undefined}>
-                <button
-                  type="button"
-                  className="history-open"
-                  aria-current={conversation.id === activeId ? 'true' : undefined}
-                  onClick={() => void openConversation(conversation.id)}
-                >
-                  {conversation.title}
-                </button>
-                <button
-                  type="button"
-                  className="history-delete"
-                  aria-label={`Elimina la conversazione "${conversation.title}"`}
-                  onClick={() => void removeConversation(conversation)}
-                >
-                  Elimina
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        <div className="panel-bottom">
-          {conversations.length > 0 && (
-            <button type="button" onClick={() => void removeAllConversations()}>
-              Elimina tutta la cronologia
-            </button>
-          )}
-          {account.isAdmin && (
-            <button
-              type="button"
-              onClick={() => {
-                setView('users');
-                setPanelOpen(false);
-              }}
-            >
-              Utenti
-            </button>
-          )}
-          <p className="muted account-email">
-            {account.email}
-            <br />
-            Profilo: {account.profile === 'student' ? 'Studente' : 'Professionale'}
-          </p>
-          <div className="panel-row">
-            <button type="button" onClick={onSignOut}>
-              Esci
-            </button>
-            <button type="button" onClick={() => void removeAccount()}>
-              Elimina account
-            </button>
-          </div>
-        </div>
-      </aside>
+    <div className={`workspace${collapsed ? ' sidebar-collapsed' : ''}${overlayOpen ? ' sidebar-overlay-open' : ''}`}>
+      <Sidebar
+        account={account}
+        conversations={conversations}
+        activeId={activeId}
+        view={view}
+        onNewChat={startNewChat}
+        onOpenConversation={(id) => void openConversation(id)}
+        onRename={setRenaming}
+        onDelete={setDeleting}
+        onSearch={() => setSearchOpen(true)}
+        onNavigate={navigate}
+        onSignOut={onSignOut}
+        onHide={hideSidebar}
+      />
+      {overlayOpen && <div className="sidebar-scrim" aria-hidden="true" onClick={closeOverlay} />}
 
       <div className="content">
         <header className="content-header">
-          <button type="button" className="panel-toggle" onClick={() => setPanelOpen(true)}>
-            Cronologia
-          </button>
+          {!sidebarVisible && (
+            <span className="content-tools">
+              <button type="button" className="icon-button" aria-label="Apri la barra laterale" title="Apri la barra laterale" onClick={showSidebar}>
+                <SidebarIcon />
+              </button>
+              <button type="button" className="icon-button" aria-label="Nuova chat" title="Nuova chat" onClick={startNewChat}>
+                <NewChatIcon />
+              </button>
+            </span>
+          )}
           <div>
             <h1>ConoscenzIA</h1>
             <p className="muted">Strumento informativo. Non è una persona.</p>
           </div>
         </header>
 
-        {view === 'users' ? (
+        {view === 'users' && account.isAdmin ? (
           <Users onBack={() => setView('chat')} onFailure={handleFailure} />
+        ) : view === 'settings' ? (
+          <Settings
+            hasConversations={conversations.length > 0}
+            onDeleteAllConversations={() => void removeAllConversations()}
+            onDeleteAccount={() => void removeAccount()}
+          />
         ) : (
           <Chat
             messages={messages}
@@ -285,6 +322,17 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
           />
         )}
       </div>
+
+      <SearchDialog open={searchOpen} onOpenConversation={(id) => void openConversation(id)} onClose={() => setSearchOpen(false)} />
+      <RenameDialog conversation={renaming} onRename={(conversation, title) => void rename(conversation, title)} onClose={() => setRenaming(null)} />
+      <ConfirmDialog
+        open={deleting !== null}
+        title="Eliminare la chat?"
+        message={deleting ? `«${deleting.title}» verrà eliminata, con le eventuali immagini. L'operazione non si può annullare.` : ''}
+        confirmLabel="Elimina"
+        onConfirm={() => deleting && void remove(deleting)}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

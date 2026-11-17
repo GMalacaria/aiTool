@@ -79,6 +79,13 @@ Rules:
 - The multi-provider router also protects against price changes.
 - **Fallbacks implemented 2026-11-17** (`worker/llm/providers.ts`): Groq (`llama-3.3-70b-versatile`) and Gemini (`gemini-flash-lite-latest`) through their OpenAI-compatible endpoints, each enabled only if its secret (`GROQ_API_KEY`, `GEMINI_API_KEY`) is set; models and endpoints can be overridden (`*_MODEL`, `*_BASE_URL`). Order: OpenAI, Groq, Gemini. They serve only the standard tier (never the in-depth answers), and **never receive attached files** (images, extracted document text, also from earlier messages), because free tiers may train on the data and colleagues' conversations can hold private documents; such requests fail with a clear message while OpenAI is unavailable. Model ids are defaults to verify against the provider consoles. Not yet tried against the real providers.
 
+## Interface (2026-11-17)
+
+- ChatGPT-style sidebar (`src/ui/Sidebar.tsx`): tool name with a search icon (also Ctrl/Cmd+K) and a collapse icon (collapsed state remembered per device; on phones the sidebar is an overlay); "Nuova chat"; scrollable list of chats with fixed width, one line, fading end; rename and delete appear on hover or focus (always on touch screens) and open native modal dialogs (`src/ui/Modal.tsx`, `<dialog>` with `showModal()` and `closedby="any"` plus a light-dismiss fallback). The footer shows the user's name and profile and opens a popover menu (Popover API, anchored with `position-area`, fixed fallback): Profilo, Impostazioni, Utenti (admins only), Esci.
+- New conversations get a 2–4 word title from the standard model, generated from the question in parallel with the answer (metered, purpose `title`); the start of the question is the fallback.
+- Search (`GET /api/conversations/search?q=`) matches titles and message text (case-insensitive `LIKE`, wildcards escaped), returns an excerpt around the match.
+- Pages: Impostazioni (delete history, delete account), Utenti (admin).
+
 ## Usage, budgets and profiles (added 2026-11-17)
 
 - **Why**: the monthly budget only holds if every person has a daily ceiling on tokens, not only on messages.
