@@ -376,11 +376,6 @@ textarea {
   }
 }
 
-.content-tools {
-  display: flex;
-  gap: 0.125rem;
-}
-
 /* Native modal dialogs */
 
 .modal {
@@ -463,7 +458,6 @@ textarea {
 /* Pages opened from the account menu */
 
 .page-view {
-  grid-row: 2 / -1;
   display: grid;
   gap: 1.25rem;
   align-content: start;
@@ -499,74 +493,9 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
-.content {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  min-width: 0;
-  max-width: 50rem;
-  width: 100%;
-  height: 100dvh;
-  margin: 0 auto;
-}
-
-.content-header {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  padding: calc(0.75rem + env(safe-area-inset-top)) 1rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.chat-messages > * {
-  min-width: 0;
-}
-
-.chat-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  overflow-y: auto;
-}
-
-.message h2 {
-  margin: 0 0 0.2rem;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.message p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.message-user {
-  padding: 0.75rem;
-  border-radius: 0.4rem;
-  background: var(--surface);
-}
-
-.chat-form {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-}
-
-.chat-form-footer {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  justify-content: space-between;
-}
-
 /* User administration */
 
 .users {
-  grid-row: 2 / -1;
   display: grid;
   gap: 1rem;
   align-content: start;
@@ -642,17 +571,6 @@ textarea {
 }
 
 /* Generated documents */
-
-.chat-form-footer {
-  flex-wrap: wrap;
-}
-
-.chat-form-buttons {
-  display: flex;
-  margin-left: auto;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
 
 .doc {
   display: grid;
@@ -796,18 +714,6 @@ textarea {
 .attachments-pending button {
   padding: 0.15rem 0.5rem;
   font-size: 0.8rem;
-}
-
-.deep-option {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  width: fit-content;
-}
-
-.deep-option input {
-  width: auto;
-  accent-color: var(--accent);
 }
 
 /* Markdown in answers */
@@ -1123,4 +1029,307 @@ select {
   width: auto;
   margin: 0;
   accent-color: var(--accent);
+}
+
+/* Chat page */
+
+.content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.content > .page-view,
+.content > .users {
+  width: 100%;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding-top: calc(3.25rem + env(safe-area-inset-top));
+}
+
+/* Shown only while the sidebar is hidden: floating, so it takes no row of its own. */
+.content-tools {
+  position: absolute;
+  top: calc(0.5rem + env(safe-area-inset-top));
+  left: 0.5rem;
+  z-index: 1;
+  display: flex;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--background) 85%, transparent);
+}
+
+/* Empty conversation: everything in the middle of the page. */
+.chat-start {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.5rem;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.welcome {
+  min-height: 2.6em;
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.rotating-phrase {
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rotating-phrase {
+    animation: phrase-in 0.45s ease-out;
+  }
+}
+
+@keyframes phrase-in {
+  from {
+    opacity: 0;
+    translate: 0 0.35em;
+  }
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: calc(3.25rem + env(safe-area-inset-top)) 1rem 1.5rem;
+}
+
+.chat-thread > * {
+  min-width: 0;
+}
+
+/* The user's messages: on the right, in a bubble. */
+.message-user {
+  align-self: flex-end;
+  max-width: min(85%, 36rem);
+  padding: 0.6rem 0.9rem;
+  border-radius: 1.1rem 1.1rem 0.3rem 1.1rem;
+  background: var(--surface-strong);
+}
+
+.message-user p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Answers: on the left, full width, no bubble. */
+.message-assistant {
+  align-self: stretch;
+}
+
+.message p {
+  overflow-wrap: anywhere;
+}
+
+/* Waiting: what the tool is doing, with moving dots. */
+.loading {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  color: var(--muted);
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.loading-dots span {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .loading-dots span {
+    animation: dot 1.2s ease-in-out infinite;
+  }
+
+  .loading-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .loading-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+
+@keyframes dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    translate: 0 0;
+  }
+
+  30% {
+    opacity: 1;
+    translate: 0 -0.2rem;
+  }
+}
+
+/* Composer: one line that grows with the text. */
+.chat-bottom {
+  padding: 0 1rem calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+.composer {
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.composer-message {
+  margin: 0;
+}
+
+.composer-box {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 1.6rem;
+  background: var(--background);
+  box-shadow: 0 2px 14px rgb(26 112 173 / 0.12);
+}
+
+.composer-box:focus-within {
+  border-color: var(--accent);
+}
+
+.composer-box .attachments-pending {
+  padding: 0.25rem 0.5rem 0;
+}
+
+.composer-reading {
+  padding: 0 0.75rem;
+}
+
+.composer-row {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 12rem;
+  padding: 0.45rem 0.25rem;
+  border: 0;
+  background: transparent;
+  resize: none;
+  line-height: 1.5;
+  /* Grows from one line as the text wraps, where supported; elsewhere it scrolls. */
+  field-sizing: content;
+}
+
+.composer-input:focus-visible {
+  outline: none;
+}
+
+.composer-mode-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text);
+}
+
+/* Own chevron, with room on its right, drawn in the text colour of either scheme. */
+.composer-mode-wrap::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  translate: 0 -50%;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+}
+
+.composer-mode {
+  appearance: none;
+  width: auto;
+  /* Same height as the send button. */
+  height: 2.4rem;
+  padding: 0 2.25rem 0 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.composer-mode:disabled {
+  cursor: not-allowed;
+}
+
+.send-button {
+  display: none;
+  flex-shrink: 0;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Touch screens and narrow windows get the send button; on a keyboard Enter sends. */
+@media (pointer: coarse), (max-width: 48rem) {
+  .send-button {
+    display: inline-grid;
+  }
+}
+
+.send-button:disabled {
+  background: var(--surface-strong);
+  color: var(--muted);
+  opacity: 1;
+}
+
+.composer-footnote {
+  margin: 0;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+@media (max-width: 30rem) {
+  .composer-disclaimer {
+    display: none;
+  }
 }

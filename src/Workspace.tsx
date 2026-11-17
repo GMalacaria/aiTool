@@ -279,22 +279,17 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
       {overlayOpen && <div className="sidebar-scrim" aria-hidden="true" onClick={closeOverlay} />}
 
       <div className="content">
-        <header className="content-header">
-          {!sidebarVisible && (
-            <span className="content-tools">
-              <button type="button" className="icon-button" aria-label="Apri la barra laterale" title="Apri la barra laterale" onClick={showSidebar}>
-                <SidebarIcon />
-              </button>
-              <button type="button" className="icon-button" aria-label="Nuova chat" title="Nuova chat" onClick={startNewChat}>
-                <NewChatIcon />
-              </button>
-            </span>
-          )}
-          <div>
-            <h1>ConoscenzIA</h1>
-            <p className="muted">Strumento informativo. Non è una persona.</p>
+        {!sidebarVisible && (
+          <div className="content-tools">
+            <button type="button" className="icon-button" aria-label="Apri la barra laterale" title="Apri la barra laterale" onClick={showSidebar}>
+              <SidebarIcon />
+            </button>
+            <button type="button" className="icon-button" aria-label="Nuova chat" title="Nuova chat" onClick={startNewChat}>
+              <NewChatIcon />
+            </button>
           </div>
-        </header>
+        )}
+        <h1 className="visually-hidden">ConoscenzIA</h1>
 
         {view === 'users' && account.isAdmin ? (
           <Users onBack={() => setView('chat')} onFailure={handleFailure} />
@@ -314,6 +309,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             remaining={remaining}
             dailyLimit={account.dailyLimit}
             deepRemaining={deepRemaining}
+            deepLimit={account.deepLimit}
             imagesEnabled={account.imagesEnabled}
             imageRemaining={imageRemaining}
             imageLimit={account.imageLimit}
