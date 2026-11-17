@@ -6,6 +6,8 @@ import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
+import { PlusIcon, SendIcon } from './ui/icons';
+import { RotatingText } from './ui/RotatingText';
 
 interface ChatProps {
   messages: ConversationMessage[];
@@ -13,8 +15,9 @@ interface ChatProps {
   error: string | null;
   remaining: number;
   dailyLimit: number;
-  /** In-depth answers left today. */
+  /** In-depth ("Ragiona") answers left today, and the daily allowance. */
   deepRemaining: number;
+  deepLimit: number;
   /** Image generation is on, and how many images are left today. */
   imagesEnabled: boolean;
   imageRemaining: number;
@@ -30,6 +33,32 @@ interface ChatProps {
 
 const MAX_MESSAGE_CHARS = 4000;
 
+/** Shown in turn on the empty page. The tool presents itself as a tool. */
+const WELCOME = ['Sono uno strumento a tua disposizione', 'Da dove iniziamo?', 'Di cosa hai bisogno?'] as const;
+
+/** Shown in turn while waiting: what the tool is doing, never a person "thinking". */
+const LOADING = [
+  'Richiesta in corso',
+  'Recupero delle informazioni',
+  'Verifica dei contenuti',
+  'Preparazione della risposta',
+] as const;
+
+type AnswerMode = 'normal' | 'deep';
+
+function Loading() {
+  return (
+    <div className="loading" role="status">
+      <RotatingText phrases={LOADING} interval={2200} />
+      <span className="loading-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
+  );
+}
+
 export function Chat({
   messages,
   pending,
@@ -37,6 +66,7 @@ export function Chat({
   remaining,
   dailyLimit,
   deepRemaining,
+  deepLimit,
   imagesEnabled,
   imageRemaining,
   imageLimit,
@@ -50,18 +80,22 @@ export function Chat({
   const [attachments, setAttachments] = useState<Attachments>(EMPTY_ATTACHMENTS);
   const [notes, setNotes] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
-  const [deepRequested, setDeepRequested] = useState(false);
+  const [mode, setMode] = useState<AnswerMode>('normal');
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
+    endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [messages, pending]);
 
+  const empty = messages.length === 0 && !pending;
   const limitReached = remaining <= 0;
-  // In-depth answers need the paid model.
-  const deep = deepRequested && deepRemaining > 0 && !freeMode;
+  // "Ragiona" needs the paid model and an allowance left.
+  const deepAvailable = deepRemaining > 0 && !freeMode;
+  const deep = mode === 'deep' && deepAvailable;
   const cannotSend = pending || reading || limitReached || !draft.trim();
+  const tokenShare = tokenLimit > 0 ? Math.min(100, Math.round((tokensUsed / tokenLimit) * 100)) : 100;
 
   async function send() {
     const content = draft.trim();
@@ -71,13 +105,14 @@ export function Chat({
     setDraft('');
     setAttachments(EMPTY_ATTACHMENTS);
     setNotes([]);
+    // "Ragiona" applies to one message: it has to be chosen each time.
+    setMode('normal');
     // Give the unsent message and its attachments back so they are not lost.
-    // The in-depth option applies to one message: it has to be chosen each time.
-    setDeepRequested(false);
     if (!(await onSend(content, sent, deep))) {
       setDraft(content);
       setAttachments(sent);
     }
+    inputRef.current?.focus();
   }
 
   function handleSubmit(event: FormEvent) {
@@ -116,77 +151,33 @@ export function Chat({
     setAttachments({ ...attachments, images: attachments.images.filter((_, item) => item !== index) });
   }
 
-  return (
-    <>
-      <main className="chat-messages" aria-live="polite">
-        {messages.length === 0 && (
-          <p className="muted">
-            Scrivi una domanda. Puoi anche allegare immagini o PDF. Per ottenere un file da scaricare o un'immagine, chiedilo
-            in modo esplicito, ad esempio «fammi un PDF…», «crea un documento Excel…» o «genera un'immagine di…».
-          </p>
-        )}
-        {messages.map((message, index) => (
-          <Fragment key={index}>
-            <article className={`message message-${message.role}`}>
-              <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
-              {message.document ? (
-                <DocumentView document={message.document} />
-              ) : message.image ? (
-                <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
-              ) : message.role === 'assistant' ? (
-                <Markdown text={message.content} />
-              ) : (
-                <p>{message.content}</p>
-              )}
-              {message.role === 'assistant' && message.freeModel && (
-              <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
-            )}
-            {message.attachments && hasAttachments(message.attachments) && (
-                <ul className="attachments" aria-label="Allegati">
-                  {message.attachments.documents.map((name, item) => (
-                    <li key={`document-${item}`}>Documento: {name}</li>
-                  ))}
-                  {message.attachments.images.map((name, item) => (
-                    <li key={`image-${item}`}>Immagine: {name}</li>
-                  ))}
-                </ul>
-              )}
-            </article>
-            {reminderAfter(messages, index) && (
-              <aside className="reminder" role="note">
-                {REMINDER_TEXT}
-              </aside>
-            )}
-          </Fragment>
-        ))}
-        {pending && (
-          <p role="status" className="muted">
-            Richiesta in corso
-          </p>
-        )}
-        <div ref={endRef} />
-      </main>
+  const composer = (
+    <form className="composer" onSubmit={handleSubmit}>
+      {error && (
+        <p role="alert" className="error composer-message">
+          {error}
+        </p>
+      )}
+      {limitReached && !error && <p className="composer-message muted">Limite giornaliero raggiunto, torna domani.</p>}
+      {freeMode && !limitReached && (
+        <p className="notice composer-message" role="status">
+          {freeAvailable
+            ? 'Hai esaurito i token giornalieri: fino a mezzanotte rispondono modelli gratuiti, meno accurati. «Ragiona» e lettura di allegati non sono disponibili.'
+            : 'Hai esaurito i token giornalieri. Torna domani.'}
+        </p>
+      )}
+      {notes.map((note, index) => (
+        <p key={index} role="status" className="composer-message muted">
+          {note}
+        </p>
+      ))}
 
-      <form className="chat-form" onSubmit={handleSubmit}>
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        {limitReached && !error && <p className="muted">Limite giornaliero raggiunto, torna domani.</p>}
-        {freeMode && !limitReached && (
-          <p className="notice" role="status">
-            {freeAvailable
-              ? 'Hai esaurito i token giornalieri: fino a mezzanotte rispondono modelli gratuiti, meno accurati. Risposte approfondite e lettura di allegati non sono disponibili.'
-              : 'Hai esaurito i token giornalieri. Torna domani.'}
-          </p>
-        )}
-
+      <div className="composer-box">
         {hasAttachments(attachments) && (
           <ul className="attachments attachments-pending" aria-label="Allegati da inviare">
             {attachments.documents.map((document, index) => (
               <li key={`document-${index}`}>
-                <span>Documento: {document.name}</span>
+                <span>{document.name}</span>
                 <button type="button" aria-label={`Rimuovi ${document.name}`} onClick={() => removeDocument(index)}>
                   Rimuovi
                 </button>
@@ -204,63 +195,133 @@ export function Chat({
           </ul>
         )}
         {reading && (
-          <p role="status" className="muted">
+          <p role="status" className="muted composer-reading">
             Lettura dei file in corso
           </p>
         )}
-        {notes.map((note, index) => (
-          <p key={index} role="status" className="muted">
-            {note}
-          </p>
-        ))}
 
-        <label htmlFor="question" className="visually-hidden">
-          Domanda
-        </label>
-        <textarea
-          id="question"
-          rows={3}
-          maxLength={MAX_MESSAGE_CHARS}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={limitReached}
-        />
-        <label className="deep-option">
+        <div className="composer-row">
           <input
-            type="checkbox"
-            checked={deep}
-            disabled={limitReached || deepRemaining <= 0 || freeMode}
-            onChange={(event) => setDeepRequested(event.target.checked)}
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            multiple
+            hidden
+            onChange={(event) => void handleFiles(event)}
           />
-          <span>
-            Risposta più approfondita <span className="muted">(rimaste oggi: {deepRemaining})</span>
-          </span>
-        </label>
-        <div className="chat-form-footer">
-          <span className="muted">
-            Messaggi rimasti oggi: {remaining} di {dailyLimit}
-            {imagesEnabled && imageLimit > 0 && ` · Immagini: ${imageRemaining} di ${imageLimit}`}
-            {` · Token: ${Math.min(100, tokenLimit > 0 ? Math.round((tokensUsed / tokenLimit) * 100) : 100)}% usati`}
-          </span>
-          <div className="chat-form-buttons">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              hidden
-              onChange={(event) => void handleFiles(event)}
-            />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={pending || reading || limitReached}>
-              Allega
-            </button>
-            <button type="submit" className="button-primary" disabled={cannotSend}>
-              Invia
-            </button>
-          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Allega immagini o PDF"
+            title="Allega immagini o PDF"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={pending || reading || limitReached}
+          >
+            <PlusIcon />
+          </button>
+
+          <label htmlFor="question" className="visually-hidden">
+            Richiesta
+          </label>
+          <textarea
+            ref={inputRef}
+            id="question"
+            className="composer-input"
+            rows={1}
+            placeholder="Scrivi la tua richiesta"
+            maxLength={MAX_MESSAGE_CHARS}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={limitReached}
+            autoFocus
+          />
+
+          <label htmlFor="answer-mode" className="visually-hidden">
+            Tipo di risposta
+          </label>
+          <select
+            id="answer-mode"
+            className="composer-mode"
+            value={deep ? 'deep' : 'normal'}
+            onChange={(event) => setMode(event.target.value as AnswerMode)}
+            disabled={limitReached}
+          >
+            <option value="normal">Normale</option>
+            <option value="deep" disabled={!deepAvailable}>
+              Ragiona {deepRemaining}/{deepLimit}
+            </option>
+          </select>
+
+          <button type="submit" className="send-button" aria-label="Invia" title="Invia" disabled={cannotSend}>
+            <SendIcon />
+          </button>
         </div>
-      </form>
+      </div>
+
+      <p className="composer-footnote muted">
+        Messaggi oggi: {remaining}/{dailyLimit}
+        {imagesEnabled && imageLimit > 0 && ` · Immagini: ${imageRemaining}/${imageLimit}`}
+        {` · Token usati: ${tokenShare}%`}
+        <span className="composer-disclaimer"> · Strumento di intelligenza artificiale: può commettere errori.</span>
+      </p>
+    </form>
+  );
+
+  if (empty) {
+    return (
+      <main className="chat-start">
+        <h2 className="welcome">
+          <RotatingText phrases={WELCOME} interval={3500} />
+        </h2>
+        {composer}
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <main className="chat-messages" aria-live="polite">
+        <div className="chat-thread">
+          {messages.map((message, index) => (
+            <Fragment key={index}>
+              <article className={`message message-${message.role}`}>
+                <h2 className="visually-hidden">{message.role === 'user' ? 'La tua richiesta' : 'Risposta'}</h2>
+                {message.document ? (
+                  <DocumentView document={message.document} />
+                ) : message.image ? (
+                  <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
+                ) : message.role === 'assistant' ? (
+                  <Markdown text={message.content} />
+                ) : (
+                  <p>{message.content}</p>
+                )}
+                {message.role === 'assistant' && message.freeModel && (
+                  <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
+                )}
+                {message.attachments && hasAttachments(message.attachments) && (
+                  <ul className="attachments" aria-label="Allegati">
+                    {message.attachments.documents.map((name, item) => (
+                      <li key={`document-${item}`}>Documento: {name}</li>
+                    ))}
+                    {message.attachments.images.map((name, item) => (
+                      <li key={`image-${item}`}>Immagine: {name}</li>
+                    ))}
+                  </ul>
+                )}
+              </article>
+              {reminderAfter(messages, index) && (
+                <aside className="reminder" role="note">
+                  {REMINDER_TEXT}
+                </aside>
+              )}
+            </Fragment>
+          ))}
+          {pending && <Loading />}
+          <div ref={endRef} />
+        </div>
+      </main>
+      <div className="chat-bottom">{composer}</div>
     </>
   );
 }
