@@ -14,6 +14,7 @@ import {
   type ConversationSummary,
 } from './api';
 import { Chat } from './Chat';
+import { Profile } from './pages/Profile';
 import { Settings } from './pages/Settings';
 import { ConfirmDialog, RenameDialog } from './ui/ConversationDialogs';
 import { NewChatIcon, SidebarIcon } from './ui/icons';
@@ -297,6 +298,8 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
 
         {view === 'users' && account.isAdmin ? (
           <Users onBack={() => setView('chat')} onFailure={handleFailure} />
+        ) : view === 'profile' ? (
+          <Profile account={account} onFailure={handleFailure} />
         ) : view === 'settings' ? (
           <Settings
             hasConversations={conversations.length > 0}
