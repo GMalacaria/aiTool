@@ -60,10 +60,11 @@ function SourceLink({ n, item }: { n: number; item: SourceItem | undefined }) {
 }
 
 /**
- * A [?] marker: a toggletip that opens on hover or focus where `interestfor`
+ * A [?] marker, or [n?] when the writer cited source n but it could not be
+ * read: a toggletip that opens on hover or focus where `interestfor`
  * exists, and on click or tap everywhere.
  */
-function UncheckedMarker({ item }: { item?: SourceItem }) {
+function UncheckedMarker({ n, item }: { n?: number; item?: SourceItem }) {
   const id = useId();
   const tip = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
@@ -81,18 +82,18 @@ function UncheckedMarker({ item }: { item?: SourceItem }) {
       <button
         type="button"
         className="citation citation-unchecked"
-        aria-label="Affermazione non verificata: dettagli"
+        aria-label={n ? `Affermazione non verificata, fonte ${n} non leggibile: dettagli` : 'Affermazione non verificata: dettagli'}
         aria-expanded={open}
         popoverTarget={id}
         popoverTargetAction="show"
         {...({ interestfor: id } as Record<string, string>)}
       >
-        [?]
+        [{n ?? ''}?]
       </button>
       <span id={id} ref={tip} className="citation-tip" role="tooltip" {...({ popover: 'hint' } as Record<string, string>)}>
         {item ? (
           <>
-            Affermazione non verificata: la fonte indicata non è leggibile.{' '}
+            Affermazione non verificata: la fonte [{n}] indicata non è leggibile.{' '}
             {item.kind === 'web' && (
               <a href={item.url} target="_blank" rel="noopener noreferrer">
                 Apri {hostOf(item.url)}
@@ -109,7 +110,7 @@ function UncheckedMarker({ item }: { item?: SourceItem }) {
 
 export function MarkerView({ marker, sources }: { marker: Marker; sources?: AnswerSources }) {
   if (marker.type === 'source') return <SourceLink n={marker.n} item={sources?.items[marker.n - 1]} />;
-  if (marker.type === 'unreadable') return <UncheckedMarker item={sources?.items[marker.n - 1]} />;
+  if (marker.type === 'unreadable') return <UncheckedMarker n={marker.n} item={sources?.items[marker.n - 1]} />;
   return <UncheckedMarker />;
 }
 

@@ -67,7 +67,9 @@ describe('source markers', () => {
     );
     expect(html).toContain('<a class="citation" href="https://www.atac.roma.it/bit" target="_blank" rel="noopener noreferrer"');
     expect(html).toContain('[1]</a>');
-    expect(html).toContain('la fonte indicata non è leggibile');
+    expect(html).toContain('la fonte [2] indicata non è leggibile');
+    expect(html).toContain('[2?]</button>');
+    expect(html).toContain('[?]</button>');
     expect(html).toContain('nessuna fonte leggibile la conferma');
     expect(html).toContain('popover="hint"');
     expect(html).toContain('<section class="source-legend" aria-label="Fonti"><h3>Fonti</h3><ol>');
