@@ -17,6 +17,7 @@ import {
 import { hasAttachments, toStored } from '../shared/attachments';
 import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
+import { MAX_QUESTIONS_PER_CONVERSATION } from '../shared/conversation';
 import { parseSources } from '../shared/sources';
 import {
   generateTitle,
@@ -40,6 +41,7 @@ import {
   deleteAllConversations,
   deleteConversation,
   findConversation,
+  countQuestions,
   findAnswer,
   findImage,
   lastAnswerId,
@@ -330,6 +332,10 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
   if (request.conversationId && !(await findConversation(db, user, request.conversationId))) {
     return c.json({ error: 'not_found' }, 404);
+  }
+  // A full conversation takes no more requests: the user opens a new chat. Nothing is consumed.
+  if (request.conversationId && (await countQuestions(db, request.conversationId)) >= MAX_QUESTIONS_PER_CONVERSATION) {
+    return c.json({ error: 'conversation_limit_reached' }, 409);
   }
 
   // Sensitive exchanges get a fixed answer, cost nothing and are never stored.

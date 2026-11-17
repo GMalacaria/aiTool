@@ -42,6 +42,7 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_request: 'Richiesta non valida.',
   not_found: 'Conversazione non trovata.',
   service_unavailable: 'Servizio non disponibile. Riprova più tardi.',
+  conversation_limit_reached: 'Questa chat ha raggiunto il limite di richieste. Apri una nuova chat per continuare.',
   sources_unavailable: 'Verifica delle fonti non disponibile in questo momento. Riprova più tardi.',
   attachments_unavailable:
     'In questo momento gli allegati non possono essere letti. Riprova più tardi oppure invia la domanda senza allegati.',
@@ -357,6 +358,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             freeAvailable={account.freeAvailable}
             onSend={send}
             onVerifySources={verifySources}
+            onNewChat={startNewChat}
           />
         )}
       </div>

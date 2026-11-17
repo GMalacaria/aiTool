@@ -106,6 +106,15 @@ export async function saveExchange(
   return conversation;
 }
 
+/** Requests (user messages) already in a conversation. */
+export async function countQuestions(db: D1Database, conversationId: string): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS questions FROM messages WHERE conversation_id = ? AND role = 'user'")
+    .bind(conversationId)
+    .first<{ questions: number }>();
+  return row?.questions ?? 0;
+}
+
 /** Id of the latest answer in a conversation: the client needs it to ask for a source check. */
 export async function lastAnswerId(db: D1Database, conversationId: string): Promise<number | null> {
   const row = await db
