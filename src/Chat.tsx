@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/attachments';
-import type { AnswerFormat, ConversationMessage } from './api';
+import type { ConversationMessage } from './api';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
+import { Markdown } from './Markdown';
 
 interface ChatProps {
   messages: ConversationMessage[];
@@ -13,7 +14,7 @@ interface ChatProps {
   /** In-depth answers left today. */
   deepRemaining: number;
   /** Resolves to false when the message was not sent. */
-  onSend: (content: string, format: AnswerFormat, attachments: Attachments, deep: boolean) => Promise<boolean>;
+  onSend: (content: string, attachments: Attachments, deep: boolean) => Promise<boolean>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -35,7 +36,7 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
   const deep = deepRequested && deepRemaining > 0;
   const cannotSend = pending || reading || limitReached || !draft.trim();
 
-  async function send(format: AnswerFormat = 'text') {
+  async function send() {
     const content = draft.trim();
     if (!content || pending || reading || limitReached) return;
 
@@ -46,7 +47,7 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
     // Give the unsent message and its attachments back so they are not lost.
     // The in-depth option applies to one message: it has to be chosen each time.
     setDeepRequested(false);
-    if (!(await onSend(content, format, sent, deep))) {
+    if (!(await onSend(content, sent, deep))) {
       setDraft(content);
       setAttachments(sent);
     }
@@ -91,11 +92,22 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
   return (
     <>
       <main className="chat-messages" aria-live="polite">
-        {messages.length === 0 && <p className="muted">Scrivi una domanda.</p>}
+        {messages.length === 0 && (
+          <p className="muted">
+            Scrivi una domanda. Puoi anche allegare immagini o PDF. Per ottenere un file da scaricare, chiedilo in modo
+            esplicito, ad esempio «fammi un PDF…» o «crea un documento Excel…».
+          </p>
+        )}
         {messages.map((message, index) => (
           <article key={index} className={`message message-${message.role}`}>
             <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
-            {message.document ? <DocumentView document={message.document} /> : <p>{message.content}</p>}
+            {message.document ? (
+              <DocumentView document={message.document} />
+            ) : message.role === 'assistant' ? (
+              <Markdown text={message.content} />
+            ) : (
+              <p>{message.content}</p>
+            )}
             {message.attachments && hasAttachments(message.attachments) && (
               <ul className="attachments" aria-label="Allegati">
                 {message.attachments.documents.map((name, item) => (
@@ -195,18 +207,11 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={pending || reading || limitReached}>
               Allega
             </button>
-            <button type="button" onClick={() => void send('document')} disabled={cannotSend}>
-              Crea documento
-            </button>
             <button type="submit" className="button-primary" disabled={cannotSend}>
               Invia
             </button>
           </div>
         </div>
-        <p className="muted">
-          «Allega» aggiunge immagini o PDF alla domanda. «Crea documento» produce un file con testo, tabelle, grafici o
-          test, scaricabile in PDF o Excel.
-        </p>
       </form>
     </>
   );

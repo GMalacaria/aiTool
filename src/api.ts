@@ -15,8 +15,6 @@ export interface Account {
   deepRemaining: number;
 }
 
-export type AnswerFormat = 'text' | 'document';
-
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   /** For document answers, the document title. */
@@ -36,7 +34,7 @@ export interface ChatResult {
   answer: string;
   /** Absent on fixed answers, which do not touch the allowances. */
   deepRemaining?: number;
-  /** Present when a document was requested. */
+  /** Present when the answer is a document. */
   document?: DocumentSpec;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
@@ -108,10 +106,9 @@ export const deleteAllConversations = () => request<void>('/conversations', 'DEL
 export const sendMessage = (
   conversationId: string | null,
   message: string,
-  format: AnswerFormat,
   attachments: Attachments,
   deep: boolean,
-) => request<ChatResult>('/chat', 'POST', { conversationId, message, format, attachments, deep });
+) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
 export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number }) =>

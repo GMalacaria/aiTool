@@ -16,7 +16,7 @@ import {
 } from './auth/session';
 import { hasAttachments, toStored } from '../shared/attachments';
 import { parseDocument } from '../shared/document';
-import { answer, createDocument, MAX_HISTORY_MESSAGES, parseChatRequest, type ConversationMessage } from './chat';
+import { MAX_HISTORY_MESSAGES, parseChatRequest, respond, type ConversationMessage } from './chat';
 import {
   deleteAllConversations,
   deleteConversation,
@@ -193,12 +193,13 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     const { attachments } = request;
     const stored = hasAttachments(attachments) ? toStored(attachments) : null;
 
-    const generate = async (useDeep: boolean) => {
-      const routers = { draft: getRouter(c.env, useDeep ? 'deep' : 'standard'), review: getRouter(c.env), deep: useDeep };
-      return request.format === 'document'
-        ? { document: await createDocument(routers.draft, history, request.message, attachments) }
-        : { text: await answer(routers, history, request.message, attachments) };
-    };
+    const generate = (useDeep: boolean) =>
+      respond(
+        { draft: getRouter(c.env, useDeep ? 'deep' : 'standard'), review: getRouter(c.env), deep: useDeep },
+        history,
+        request.message,
+        attachments,
+      );
 
     let result: Awaited<ReturnType<typeof generate>>;
     try {
@@ -214,7 +215,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
     const conversation = result.document
       ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored)
-      : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored);
+      : await saveExchange(db, user, request.conversationId, request.message, result.text, 'text', stored);
 
     return c.json({
       answer: result.document ? result.document.title : result.text,

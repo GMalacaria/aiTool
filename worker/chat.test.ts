@@ -1,41 +1,83 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  answer,
-  createDocument,
+  detectIntent,
   MAX_HISTORY_MESSAGES,
   parseChatRequest,
   questionContent,
+  respond,
   truncateHistory,
   type ConversationMessage,
+  type Routers,
 } from './chat';
 import { titleFrom } from './conversations';
-import type { ChatMessage, ProviderRouter } from './llm/router';
-import { applyReview, DEEP_INSTRUCTION, DOCUMENT_SYSTEM_PROMPT, REVIEW_SYSTEM_PROMPT, SYSTEM_PROMPT } from './prompts';
+import type { ChatMessage, CompletionOptions, ProviderRouter } from './llm/router';
+import {
+  applyReview,
+  DEEP_INSTRUCTION,
+  DOCUMENT_SYSTEM_PROMPT,
+  INTENT_SYSTEM_PROMPT,
+  parseIntent,
+  REVIEW_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+} from './prompts';
 import { detectSensitiveTopic } from './sensitive';
 import { currentDay } from './usage';
 
 const user = (content: string): ConversationMessage => ({ role: 'user', content, kind: 'text', attachments: null });
-const assistant = (content: string): ConversationMessage => ({ role: 'assistant', content, kind: 'text', attachments: null });
+const assistant = (content: string): ConversationMessage => ({
+  role: 'assistant',
+  content,
+  kind: 'text',
+  attachments: null,
+});
 const CONVERSATION_ID = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
+const NO_ATTACHMENTS = { documents: [], images: [] };
+
+interface Script {
+  /** What the intent call replies; an Error makes it fail. */
+  intent?: string | Error;
+  /** What the model writes: a text answer, or the JSON of a document. */
+  draft?: string | Error;
+  review?: string | Error;
+  deep?: boolean;
+}
+
+/** Routers whose replies depend on which system prompt they receive. */
+function fakeRouters({ intent = 'text', draft = 'Answer.', review = 'OK', deep = false }: Script = {}) {
+  const reply = (value: string | Error) => {
+    if (value instanceof Error) throw value;
+    return value;
+  };
+  const draftComplete = vi.fn(async (_messages: ChatMessage[], _options: CompletionOptions) => reply(draft));
+  const standardComplete = vi.fn(async (messages: ChatMessage[], _options: CompletionOptions) =>
+    reply(messages[0].content === INTENT_SYSTEM_PROMPT ? intent : review),
+  );
+  const routers: Routers = {
+    draft: { complete: draftComplete } as unknown as ProviderRouter,
+    review: { complete: standardComplete } as unknown as ProviderRouter,
+    deep,
+  };
+  const callsWith = (systemPrompt: string) =>
+    standardComplete.mock.calls.filter(([messages]) => messages[0].content === systemPrompt);
+  return { routers, draftComplete, standardComplete, callsWith };
+}
 
 describe('parseChatRequest', () => {
   it('accepts a new conversation and trims the message', () => {
     expect(parseChatRequest({ message: ' hello ' })).toEqual({
       conversationId: null,
       message: 'hello',
-      format: 'text',
-      attachments: { documents: [], images: [] },
+      attachments: NO_ATTACHMENTS,
       deep: false,
     });
   });
 
-  it('accepts an existing conversation id', () => {
-    expect(parseChatRequest({ conversationId: CONVERSATION_ID, message: 'hi', format: 'document' })).toEqual({
+  it('accepts an existing conversation id and the deep flag', () => {
+    expect(parseChatRequest({ conversationId: CONVERSATION_ID, message: 'hi', deep: true })).toEqual({
       conversationId: CONVERSATION_ID,
       message: 'hi',
-      format: 'document',
-      attachments: { documents: [], images: [] },
-      deep: false,
+      attachments: NO_ATTACHMENTS,
+      deep: true,
     });
   });
 
@@ -45,7 +87,6 @@ describe('parseChatRequest', () => {
     ['too long message', { message: 'x'.repeat(4001) }],
     ['non-string message', { message: 42 }],
     ['malformed conversation id', { conversationId: 'abc', message: 'hi' }],
-    ['unknown format', { message: 'hi', format: 'image' }],
     ['non-boolean deep flag', { message: 'hi', deep: 'yes' }],
     ['invalid attachments', { message: 'hi', attachments: { images: [{ name: 'x', dataUrl: 'https://evil.test/x.png' }] } }],
     ['non-object payload', null],
@@ -90,77 +131,152 @@ describe('applyReview', () => {
   });
 });
 
-describe('answer', () => {
-  const routerReturning = (...replies: (string | Error)[]) => {
-    const complete = vi.fn(async (_messages: ChatMessage[]) => {
-      const reply = replies.shift();
-      if (reply instanceof Error || reply === undefined) throw reply ?? new Error('no reply');
-      return reply;
+describe('intent detection', () => {
+  it.each([
+    ['document', 'document'],
+    [' Document. ', 'document'],
+    ['text', 'text'],
+    ['I think this is not a document', 'text'],
+    ['', 'text'],
+  ])('reads %j as %s', (reply, expected) => {
+    expect(parseIntent(reply)).toBe(expected);
+  });
+
+  it('asks a fast question that includes the message, the attachments and the previous answer kind', async () => {
+    const { routers, standardComplete } = fakeRouters({ intent: 'document' });
+    const history: ConversationMessage[] = [user('Make a quiz'), { ...assistant('{}'), kind: 'document' }];
+
+    await expect(
+      detectIntent(routers.review, history, 'Add two questions', { documents: [{ name: 'a.pdf', text: 'Body' }], images: [] }),
+    ).resolves.toBe('document');
+
+    const [messages, options] = standardComplete.mock.calls[0];
+    expect(messages[0]).toEqual({ role: 'system', content: INTENT_SYSTEM_PROMPT });
+    expect(messages[1].content).toContain('<previous_answer_was_document>yes</previous_answer_was_document>');
+    expect(messages[1].content).toContain('<attached_files>a.pdf</attached_files>');
+    expect(messages[1].content).toContain('Add two questions');
+    expect(messages[1].content).not.toContain('Body');
+    expect(options.fast).toBe(true);
+  });
+
+  it('tells the classifier that only explicit file requests are documents', () => {
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/ONLY when the user explicitly asks for a file/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/table.*WITHOUT mention of a file/s);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/When in doubt, reply text/);
+  });
+
+  it('lets text answers use Markdown and never offers files', () => {
+    expect(SYSTEM_PROMPT).toMatch(/Markdown/);
+    expect(SYSTEM_PROMPT).toMatch(/table/);
+    expect(SYSTEM_PROMPT).toMatch(/Never offer to create a file/);
+  });
+
+  it('falls back to text when the call fails', async () => {
+    const { routers } = fakeRouters({ intent: new Error('down') });
+    await expect(detectIntent(routers.review, [], 'Make a quiz', NO_ATTACHMENTS)).resolves.toBe('text');
+  });
+});
+
+describe('respond with text', () => {
+  it('sends the history, then reviews the draft', async () => {
+    const { routers, draftComplete, callsWith } = fakeRouters({ draft: 'Great question! Rome.', review: 'Rome.' });
+
+    await expect(respond(routers, [user('Hi'), assistant('Hello.')], 'Capital of Italy?')).resolves.toEqual({
+      text: 'Rome.',
     });
-    const router = { complete } as unknown as ProviderRouter;
-    return { router, routers: { draft: router, review: router, deep: false }, complete };
-  };
 
-  it('sends the conversation history, then reviews the draft', async () => {
-    const { routers, complete } = routerReturning('Great question! Rome.', 'Rome.');
-    const history = [user('Hi'), assistant('Hello.')];
-
-    await expect(answer(routers, history, 'Capital of Italy?')).resolves.toBe('Rome.');
-
-    const [draftCall, reviewCall] = complete.mock.calls.map(([messages]) => messages);
-    expect(draftCall).toEqual([
+    expect(draftComplete.mock.calls[0][0]).toEqual([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: 'Hi' },
       { role: 'assistant', content: 'Hello.' },
       { role: 'user', content: 'Capital of Italy?' },
     ]);
-    expect(reviewCall[0]).toEqual({ role: 'system', content: REVIEW_SYSTEM_PROMPT });
-    expect(reviewCall[1].content).toContain('Capital of Italy?');
-    expect(reviewCall[1].content).toContain('Great question! Rome.');
+
+    const review = callsWith(REVIEW_SYSTEM_PROMPT)[0][0];
+    expect(review[1].content).toContain('Capital of Italy?');
+    expect(review[1].content).toContain('Great question! Rome.');
   });
 
   it('returns the draft when the review pass fails', async () => {
-    const { routers } = routerReturning('Rome.', new Error('rate limited'));
-    await expect(answer(routers, [], 'Capital of Italy?')).resolves.toBe('Rome.');
+    const { routers } = fakeRouters({ draft: 'Rome.', review: new Error('rate limited') });
+    await expect(respond(routers, [], 'Capital of Italy?')).resolves.toEqual({ text: 'Rome.' });
   });
 
   it('fails when the draft cannot be generated', async () => {
-    const { routers } = routerReturning(new Error('down'));
-    await expect(answer(routers, [], 'Capital of Italy?')).rejects.toThrow('down');
+    const { routers } = fakeRouters({ draft: new Error('down') });
+    await expect(respond(routers, [], 'Capital of Italy?')).rejects.toThrow('down');
+  });
+
+  it('adds the in-depth instruction and allows longer output when asked', async () => {
+    const { routers, draftComplete } = fakeRouters({ draft: 'Long answer.', deep: true });
+
+    await expect(respond(routers, [], 'Explain')).resolves.toEqual({ text: 'Long answer.' });
+
+    const [messages, options] = draftComplete.mock.calls[0];
+    expect(messages[0]).toEqual({ role: 'system', content: `${SYSTEM_PROMPT}\n${DEEP_INSTRUCTION}` });
+    expect(options.maxOutputTokens).toBeGreaterThan(700);
+  });
+
+  it('labels an earlier document so it is not imitated in a text answer', async () => {
+    const { routers, draftComplete } = fakeRouters();
+    const stored = JSON.stringify({ title: 'Report', blocks: [] });
+
+    await respond(routers, [user('Make a report'), { ...assistant(stored), kind: 'document' }], 'What is in it?');
+
+    const past = draftComplete.mock.calls[0][0][2].content;
+    expect(past).toContain('[A document was created and shown to the user');
+    expect(past).toContain(stored);
   });
 });
 
-describe('in-depth answers', () => {
-  it('drafts with the in-depth model, reviews with the standard one, and allows longer output', async () => {
-    const draft = vi.fn(async (_messages: ChatMessage[], _options: { maxOutputTokens: number }) => 'Long answer.');
-    const review = vi.fn(async (_messages: ChatMessage[], _options: { maxOutputTokens: number }) => 'OK');
-    const routers = {
-      draft: { complete: draft } as unknown as ProviderRouter,
-      review: { complete: review } as unknown as ProviderRouter,
-      deep: true,
-    };
+describe('respond with a document', () => {
+  // The standard model also starts a text draft while the intent is detected.
+  const documentCall = (complete: ReturnType<typeof fakeRouters>['draftComplete']) =>
+    complete.mock.calls.find(([messages]) => messages[0].content === DOCUMENT_SYSTEM_PROMPT)!;
 
-    await expect(answer(routers, [], 'Explain')).resolves.toBe('Long answer.');
+  const spec = JSON.stringify({ title: 'Report', blocks: [{ type: 'paragraph', text: 'Body' }, { type: 'unknown' }] });
 
-    expect(draft).toHaveBeenCalledTimes(1);
-    expect(review).toHaveBeenCalledTimes(1);
-    expect(draft.mock.calls[0][0][0].content).toBe(`${SYSTEM_PROMPT}\n${DEEP_INSTRUCTION}`);
-    expect(review.mock.calls[0][0][0]).toEqual({ role: 'system', content: REVIEW_SYSTEM_PROMPT });
-    expect(draft.mock.calls[0][1].maxOutputTokens).toBeGreaterThan(700);
+  it('asks for JSON and returns the validated document, without a review pass', async () => {
+    const { routers, draftComplete, callsWith } = fakeRouters({ intent: 'document', draft: spec });
+
+    await expect(respond(routers, [], 'Make a report')).resolves.toEqual({
+      document: { title: 'Report', dataProvidedByUser: false, blocks: [{ type: 'paragraph', text: 'Body' }] },
+    });
+
+    const [messages, options] = documentCall(draftComplete);
+    expect(messages[0]).toEqual({ role: 'system', content: DOCUMENT_SYSTEM_PROMPT });
+    expect(options).toMatchObject({ json: true });
+    expect(callsWith(REVIEW_SYSTEM_PROMPT)).toHaveLength(0);
   });
 
-  it('accepts the deep flag in the request', () => {
-    expect(parseChatRequest({ message: 'hi', deep: true })?.deep).toBe(true);
+  it('does not start a speculative text draft with the in-depth model', async () => {
+    const { routers, draftComplete } = fakeRouters({ intent: 'document', draft: spec, deep: true });
+
+    await respond(routers, [], 'Make a report');
+
+    expect(draftComplete).toHaveBeenCalledTimes(1);
+    expect(draftComplete.mock.calls[0][0][0].content).toBe(DOCUMENT_SYSTEM_PROMPT);
+  });
+
+  it.each([
+    ['output that is not JSON', 'not json'],
+    ['a document with nothing renderable', '{"blocks":[]}'],
+  ])('fails on %s', async (_label, draft) => {
+    await expect(respond(fakeRouters({ intent: 'document', draft }).routers, [], 'x')).rejects.toThrow();
+  });
+
+  it('gives the model the earlier document as raw JSON, so it can be changed', async () => {
+    const { routers, draftComplete } = fakeRouters({ intent: 'document', draft: spec });
+    const stored = JSON.stringify({ title: 'Report', blocks: [] });
+
+    await respond(routers, [user('Make a report'), { ...assistant(stored), kind: 'document' }], 'Add a chapter');
+
+    expect(documentCall(draftComplete)[0][2]).toEqual({ role: 'assistant', content: stored });
   });
 });
 
 describe('attachments in model messages', () => {
   const IMAGE = 'data:image/jpeg;base64,AAAA';
-  const capture = () => {
-    const complete = vi.fn(async (_messages: ChatMessage[]) => 'OK');
-    const router = { complete } as unknown as ProviderRouter;
-    return { router, routers: { draft: router, review: router, deep: false }, complete };
-  };
 
   it('inlines document text and sends images as separate parts', () => {
     expect(questionContent('Summarise', { documents: [{ name: 'a.pdf', text: 'Body' }], images: [] })).toBe(
@@ -182,7 +298,7 @@ describe('attachments in model messages', () => {
   });
 
   it('re-sends stored document text in the history, and only mentions past images', async () => {
-    const { routers, complete } = capture();
+    const { routers, draftComplete, callsWith } = fakeRouters({ draft: 'The date.' });
     const history: ConversationMessage[] = [
       {
         role: 'user',
@@ -193,53 +309,24 @@ describe('attachments in model messages', () => {
       assistant('Summary.'),
     ];
 
-    await answer(routers, history, 'And the date?');
+    await respond(routers, history, 'And the date?');
 
-    const [draftCall, reviewCall] = complete.mock.calls.map(([messages]) => messages);
-    expect(draftCall[1].content).toBe(
+    const messages = draftComplete.mock.calls[0][0];
+    expect(messages[1].content).toBe(
       '<attached_document name="a.pdf">\nBody\n</attached_document>\n\nSummarise' +
         '\n\n[Images attached to this message, no longer available: photo.jpg]',
     );
-    expect(draftCall[3]).toEqual({ role: 'user', content: 'And the date?' });
-    expect(reviewCall[1].content).not.toContain('Body');
+    expect(messages[3]).toEqual({ role: 'user', content: 'And the date?' });
+    expect(callsWith(REVIEW_SYSTEM_PROMPT)[0][0][1].content).not.toContain('Body');
   });
 
   it('tells the reviewer which files were attached, without their content', async () => {
-    const { routers, complete } = capture();
-    await answer(routers, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Secret body' }], images: [] });
+    const { routers, callsWith } = fakeRouters({ draft: 'Summary.' });
+    await respond(routers, [], 'Summarise', { documents: [{ name: 'a.pdf', text: 'Secret body' }], images: [] });
 
-    const review = complete.mock.calls[1][0][1].content;
+    const review = callsWith(REVIEW_SYSTEM_PROMPT)[0][0][1].content;
     expect(review).toContain('[The user attached: a.pdf]');
     expect(review).not.toContain('Secret body');
-  });
-});
-
-describe('createDocument', () => {
-  const routerReturning = (reply: string) => {
-    const complete = vi.fn(async (_messages: ChatMessage[], _options: unknown) => reply);
-    const router = { complete } as unknown as ProviderRouter;
-    return { router, routers: { draft: router, review: router, deep: false }, complete };
-  };
-
-  it('asks for JSON and returns the validated document', async () => {
-    const { router, complete } = routerReturning(
-      JSON.stringify({ title: 'Report', blocks: [{ type: 'paragraph', text: 'Body' }, { type: 'unknown' }] }),
-    );
-
-    await expect(createDocument(router, [], 'Make a report')).resolves.toEqual({
-      title: 'Report',
-      dataProvidedByUser: false,
-      blocks: [{ type: 'paragraph', text: 'Body' }],
-    });
-
-    const [messages, options] = complete.mock.calls[0];
-    expect(messages[0]).toEqual({ role: 'system', content: DOCUMENT_SYSTEM_PROMPT });
-    expect(options).toMatchObject({ json: true });
-  });
-
-  it('fails when the model output is not a usable document', async () => {
-    await expect(createDocument(routerReturning('not json').router, [], 'x')).rejects.toThrow();
-    await expect(createDocument(routerReturning('{"blocks":[]}').router, [], 'x')).rejects.toThrow();
   });
 });
 
