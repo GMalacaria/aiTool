@@ -106,90 +106,103 @@ function UserCard({ user, onChange }: { user: ManagedUser; onChange: (changes: U
 
   const tokenShare = user.tokenLimit > 0 ? Math.min(100, Math.round((user.todayPaidTokens / user.tokenLimit) * 100)) : 100;
 
+  const status = user.isAdmin ? 'Amministratore' : STATUS_LABEL[user.status];
+
   return (
     <li>
-      <div className="user-head">
-        <div>
-          <strong>{user.name}</strong>
-          <p className="muted">{user.email}</p>
-          <p className="muted">Stato: {user.isAdmin ? 'Amministratore' : STATUS_LABEL[user.status]}</p>
-        </div>
-        <div className="users-actions">
-          {!user.isAdmin && user.status !== 'approved' && (
-            <button type="button" className="button-primary" onClick={() => onChange({ status: 'approved' })}>
-              Approva
-            </button>
-          )}
-          {!user.isAdmin && user.status !== 'blocked' && (
-            <button type="button" onClick={() => onChange({ status: 'blocked' })}>
-              Blocca
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Closed by default: open only the person to look at or change. */}
+      <details className="user-item">
+        <summary>
+          <span className="user-summary">
+            <span className="user-summary-name">{user.name}</span>
+            <span className="user-summary-meta">
+              {user.email} · {status} · {PROFILE_LABEL[user.profile]}
+              {` · oggi ${user.todayMessages} msg, ${tokenShare}% token`}
+            </span>
+          </span>
+        </summary>
 
-      <div className="user-settings">
-        <label>
-          <span className="muted">Profilo</span>
-          <select value={user.profile} onChange={(event) => onChange({ profile: event.target.value as Profile })}>
-            {(Object.keys(PROFILE_LABEL) as Profile[]).map((profile) => (
-              <option key={profile} value={profile}>
-                {PROFILE_LABEL[profile]}
-              </option>
+        <div className="user-body">
+          <div className="user-head">
+            <p className="muted">Stato: {status}</p>
+            <div className="users-actions">
+              {!user.isAdmin && user.status !== 'approved' && (
+                <button type="button" className="button-primary" onClick={() => onChange({ status: 'approved' })}>
+                  Approva
+                </button>
+              )}
+              {!user.isAdmin && user.status !== 'blocked' && (
+                <button type="button" onClick={() => onChange({ status: 'blocked' })}>
+                  Blocca
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="user-settings">
+            <label>
+              <span className="muted">Profilo</span>
+              <select value={user.profile} onChange={(event) => onChange({ profile: event.target.value as Profile })}>
+                {(Object.keys(PROFILE_LABEL) as Profile[]).map((profile) => (
+                  <option key={profile} value={profile}>
+                    {PROFILE_LABEL[profile]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {LIMITS.map(({ field, label, max }) => (
+              <label key={field}>
+                <span className="muted">{label}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={max}
+                  step={field === 'tokenLimit' ? 1000 : 1}
+                  defaultValue={user[field]}
+                  key={user[field]}
+                  onBlur={(event) => changeLimit(field, event.target.value, max)}
+                />
+              </label>
             ))}
-          </select>
-        </label>
-        {LIMITS.map(({ field, label, max }) => (
-          <label key={field}>
-            <span className="muted">{label}</span>
-            <input
-              type="number"
-              min={0}
-              max={max}
-              step={field === 'tokenLimit' ? 1000 : 1}
-              defaultValue={user[field]}
-              key={user[field]}
-              onBlur={(event) => changeLimit(field, event.target.value, max)}
-            />
-          </label>
-        ))}
-      </div>
+          </div>
 
-      <dl className="user-usage">
-        <div>
-          <dt>Oggi</dt>
-          <dd>
-            {user.todayMessages} messaggi, {user.todayImages} immagini
-          </dd>
-        </div>
-        <div>
-          <dt>Token a pagamento oggi</dt>
-          <dd>
-            {integer.format(user.todayPaidTokens)} di {integer.format(user.tokenLimit)} ({tokenShare}%)
-          </dd>
-        </div>
-        <div>
-          <dt>Questo mese</dt>
-          <dd>
-            {user.monthRequests} richieste, {money(user.monthCostMicroUsd)} stimati
-            {user.monthFreeTokens > 0 && `, ${integer.format(user.monthFreeTokens)} token gratuiti`}
-          </dd>
-        </div>
-      </dl>
+          <dl className="user-usage">
+            <div>
+              <dt>Oggi</dt>
+              <dd>
+                {user.todayMessages} messaggi, {user.todayImages} immagini
+              </dd>
+            </div>
+            <div>
+              <dt>Token a pagamento oggi</dt>
+              <dd>
+                {integer.format(user.todayPaidTokens)} di {integer.format(user.tokenLimit)} ({tokenShare}%)
+              </dd>
+            </div>
+            <div>
+              <dt>Questo mese</dt>
+              <dd>
+                {user.monthRequests} richieste, {money(user.monthCostMicroUsd)} stimati
+                {user.monthFreeTokens > 0 && `, ${integer.format(user.monthFreeTokens)} token gratuiti`}
+              </dd>
+            </div>
+          </dl>
 
-      <button type="button" onClick={() => void toggleUsage()} aria-expanded={open}>
-        {open ? 'Nascondi dettaglio' : 'Dettaglio ultimi 30 giorni'}
-      </button>
-      {open &&
-        (loadFailed ? (
-          <p className="error">Dettaglio non disponibile.</p>
-        ) : usage === null ? (
-          <p role="status" className="muted">
-            Caricamento
-          </p>
-        ) : (
-          <UsageTable days={usage} />
-        ))}
+          <button type="button" onClick={() => void toggleUsage()} aria-expanded={open}>
+            {open ? 'Nascondi dettaglio' : 'Dettaglio ultimi 30 giorni'}
+          </button>
+          {open &&
+            (loadFailed ? (
+              <p className="error">Dettaglio non disponibile.</p>
+            ) : usage === null ? (
+              <p role="status" className="muted">
+                Caricamento
+              </p>
+            ) : (
+              <UsageTable days={usage} />
+            ))}
+        </div>
+      </details>
     </li>
   );
 }

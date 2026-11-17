@@ -86,6 +86,7 @@ Rules:
 - Search (`GET /api/conversations/search?q=`) matches titles and message text (case-insensitive `LIKE`, wildcards escaped), returns an excerpt around the match.
 - Chat page: no header. An empty chat shows, centred, a rotating phrase ("Sono uno strumento a tua disposizione", "Da dove iniziamo?", "Di cosa hai bisogno?") above the composer; after the first message the thread scrolls with the composer at the bottom. The user's messages are right-aligned bubbles, answers are left-aligned without bubble and without "Domanda/Risposta" labels (kept for screen readers only). Composer: one line that grows with the text (`field-sizing: content`), "+" for attachments, a select "Normale / Ragiona n/m" (in-depth answer; disabled when none left or in free mode), round send button shown only on touch screens and narrow windows (Enter sends on a keyboard); below, today's counters and "Strumento di intelligenza artificiale: può commettere errori". While waiting, rotating impersonal status texts with moving dots (no animation with reduced motion).
 - Look: light-blue palette (tokens on `:root` with `light-dark()`). Light/dark follows the device by default; Settings → Aspetto can pin light or dark for this device (`src/theme.ts`: stored in `localStorage` as `color-scheme`, applied through `<meta name="color-scheme">` by an inline script in `index.html` before the first paint, mapped back to the `color-scheme` property in CSS; synced across tabs).
+- Users page (admin): an accordion of native `<details>`, all closed; each row shows name, email, status, profile and today's use, and opens to the limits, profile and usage.
 - Pages: Profilo (name, email, creation date, profile; today's remaining messages, tokens, images and in-depth answers; lifetime messages, in-depth answers, images, tokens, longest and current streak of consecutive days with use, from `GET /api/me/stats`; lifetime figures start with the usage log on 2026-11-17), Impostazioni (delete history, delete account), Utenti (admin).
 
 ## Usage, budgets and profiles (added 2026-11-17)
@@ -108,6 +109,10 @@ Rules:
 ## To be confirmed
 
 - MVP for adults only (minors bring much heavier legal and safety obligations).
+
+## Planned (agreed, not started)
+
+- **Editing images** (recorded 2026-11-17): today an attached image never reaches the image model; the planner only gets the text, so "modify this photo" produces an unrelated new picture. To do: send the attached image as an `inlineData` part with the edit instruction to Gemini (`generateContent` accepts image + text and returns the edited image; Nano Banana 2 Lite is not optimised for several reference images or long edit chains, one image is fine); tell the planner that there is an image to edit, so it writes an edit instruction; moderate the input image too (OpenAI omni-moderation accepts images); for follow-ups on a generated image ("rendila più scura") start from the stored R2 file instead of regenerating from the description; pass extracted PDF text to the planner, so a picture can be based on an attached document. Limit: attached images are not stored, so they must be attached again to edit them later.
 
 ## Open product questions (recorded 2026-11-17, not decided)
 
