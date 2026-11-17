@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   detectIntent,
+  IMAGE_NO_SOURCE_TEXT,
   IMAGES_OFF_TEXT,
   IMAGES_UNAVAILABLE_TEXT,
   MAX_HISTORY_MESSAGES,
@@ -47,6 +48,7 @@ interface Script {
   plan?: string | Error;
   flagged?: (text: string) => boolean | Error;
   imagesEnabled?: boolean;
+  imageFlagged?: (dataUrl: string) => boolean;
   /** What the intent call replies; an Error makes it fail. */
   intent?: string | Error;
   /** What the model writes: a text answer, or the JSON of a document. */
@@ -64,6 +66,7 @@ function fakeRouters({
   plan = '{"allowed":false,"prompt":"","refusal":"no"}',
   flagged = () => false,
   imagesEnabled = true,
+  imageFlagged = () => false,
 }: Script = {}) {
   const reply = (value: string | Error) => {
     if (value instanceof Error) throw value;
@@ -75,6 +78,7 @@ function fakeRouters({
       messages[0].content === INTENT_SYSTEM_PROMPT ? intent : messages[0].content === IMAGE_PROMPT_SYSTEM_PROMPT ? plan : review,
     ),
   );
+  const isImageFlagged = vi.fn(async (dataUrl: string) => imageFlagged(dataUrl));
   const isFlagged = vi.fn(async (text: string) => {
     const verdict = flagged(text);
     if (verdict instanceof Error) throw verdict;
@@ -84,11 +88,11 @@ function fakeRouters({
     draft: { complete: draftComplete } as unknown as ProviderRouter,
     review: { complete: standardComplete } as unknown as ProviderRouter,
     deep,
-    images: { enabled: imagesEnabled, isFlagged },
+    images: { enabled: imagesEnabled, isFlagged, isImageFlagged },
   };
   const callsWith = (systemPrompt: string) =>
     standardComplete.mock.calls.filter(([messages]) => messages[0].content === systemPrompt);
-  return { routers, draftComplete, standardComplete, callsWith, isFlagged };
+  return { routers, draftComplete, standardComplete, callsWith, isFlagged, isImageFlagged };
 }
 
 const standardSystemPrompts = (callsWith: ReturnType<typeof fakeRouters>['callsWith']) =>
@@ -274,7 +278,10 @@ describe('image intent', () => {
 
   it('tells the classifier that only explicit picture requests are images', () => {
     expect(INTENT_SYSTEM_PROMPT).toMatch(/image: ONLY when the user explicitly asks for a picture/);
-    expect(INTENT_SYSTEM_PROMPT).toMatch(/Questions about attached images, comments and thanks about the generated image are text/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/Questions about attached images \(what they show, what is written in them\), comments and thanks/);
+    // Editing an attached image is an image request; rewriting an attached PDF is a document.
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/modify, retouch, restyle or colour an attached image/);
+    expect(INTENT_SYSTEM_PROMPT).toMatch(/modify, correct, rewrite, translate or summarise an attached document/);
     // Follow-up changes count as images only after an image.
     expect(INTENT_SYSTEM_PROMPT).toMatch(/only when <previous_answer> is image/);
     expect(INTENT_SYSTEM_PROMPT).toMatch(/only when <previous_answer> is document/);
@@ -360,9 +367,120 @@ describe('respond with an image request', () => {
   });
 });
 
+describe('image editing', () => {
+  const PHOTO = 'data:image/jpeg;base64,UEhPVE8=';
+  const GENERATED = 'data:image/png;base64,R0VO';
+  const edit = (source: number | null, prompt = 'Make the sky darker, keep everything else') =>
+    JSON.stringify({ allowed: true, mode: 'edit', source, prompt, refusal: '' });
+  const planCall = (calls: ReturnType<typeof fakeRouters>['standardComplete']['mock']['calls']) =>
+    calls.find(([messages]) => messages[0].content === IMAGE_PROMPT_SYSTEM_PROMPT)!;
+
+  it('edits an image attached now: the planner sees its label, the generator gets the picture', async () => {
+    const { routers, standardComplete, isImageFlagged } = fakeRouters({ intent: 'image', plan: edit(1) });
+
+    const reply = await respond(routers, [], 'Rendi il cielo più scuro', {
+      documents: [],
+      images: [{ name: 'foto.jpg', dataUrl: PHOTO }],
+    });
+
+    expect(reply.image).toEqual({
+      prompt: 'Make the sky darker, keep everything else',
+      source: { label: 'attached now: foto.jpg', dataUrl: PHOTO, mimeType: 'image/jpeg' },
+    });
+    const [messages] = planCall(standardComplete.mock.calls);
+    const last = messages.at(-1)!;
+    expect(last.content).toContain('<available_images>\n1. attached now: foto.jpg\n</available_images>');
+    // The planner only reads labels: no image parts are sent to it.
+    expect(typeof last.content).toBe('string');
+    expect(isImageFlagged).toHaveBeenCalledWith(PHOTO);
+  });
+
+  it('can start from an image generated or attached earlier in the conversation', async () => {
+    const history: ConversationMessage[] = [
+      {
+        role: 'user',
+        content: 'Ecco la foto',
+        kind: 'text',
+        attachments: { documents: [], images: [{ name: 'gatto.jpg', id: 'a1' }] },
+        imageData: [{ id: 'a1', name: 'gatto.jpg', dataUrl: PHOTO, mimeType: 'image/jpeg' }],
+      },
+      assistant('Una foto di un gatto.'),
+      user('Rendila un acquerello'),
+      {
+        ...assistant('Image edited from the image attached earlier: gatto.jpg, with this instruction: watercolour'),
+        imageId: 'g1',
+        imageData: [{ id: 'g1', name: 'generated image', dataUrl: GENERATED, mimeType: 'image/png' }],
+      },
+    ];
+
+    const { routers, standardComplete } = fakeRouters({ intent: 'image', plan: edit(2, 'Watercolour, softer colours') });
+    const reply = await respond(routers, history, 'Non mi piace, riprova con colori più tenui');
+
+    const labels = planCall(standardComplete.mock.calls)[0].at(-1)!.content as string;
+    expect(labels).toContain('1. generated earlier:');
+    expect(labels).toContain('2. attached earlier: gatto.jpg');
+    // Source 2 is the original photo, not the previous result.
+    expect(reply.image?.source?.dataUrl).toBe(PHOTO);
+  });
+
+  it('says so when there is nothing to edit, instead of inventing a picture', async () => {
+    const { routers } = fakeRouters({ intent: 'image', plan: edit(3) });
+    await expect(respond(routers, [], 'Modifica la foto')).resolves.toEqual({ text: IMAGE_NO_SOURCE_TEXT });
+  });
+
+  it('refuses when moderation flags the image to edit', async () => {
+    const { routers } = fakeRouters({ intent: 'image', plan: edit(1), imageFlagged: () => true });
+    const reply = await respond(routers, [], 'Modifica', { documents: [], images: [{ name: 'x.jpg', dataUrl: PHOTO }] });
+    expect(reply.image).toBeUndefined();
+    expect(reply.text).toBeDefined();
+  });
+
+  it('sends stored images of earlier messages to the answer model again', async () => {
+    const { routers, draftComplete } = fakeRouters({ draft: 'È un gatto.' });
+    const history: ConversationMessage[] = [
+      {
+        role: 'user',
+        content: 'Guarda',
+        kind: 'text',
+        attachments: { documents: [], images: [{ name: 'gatto.jpg', id: 'a1' }, { name: 'vecchia.jpg' }] },
+        imageData: [{ id: 'a1', name: 'gatto.jpg', dataUrl: PHOTO, mimeType: 'image/jpeg' }],
+      },
+      assistant('Ok.'),
+    ];
+
+    await respond(routers, history, 'Che animale è?');
+
+    expect(draftComplete.mock.calls[0][0][1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Guarda\n\n[Images attached to this message, not shown here: vecchia.jpg]' },
+        { type: 'image_url', image_url: { url: PHOTO } },
+      ],
+    });
+  });
+
+  it('labels an edit with the image it started from', () => {
+    expect(imageMessageContent('make it blue', 'attached now: foto.jpg')).toBe(
+      'Image edited from the image attached now: foto.jpg, with this instruction: make it blue',
+    );
+  });
+});
+
 describe('parseImagePlan', () => {
   it('accepts an allowed plan and a refusal', () => {
-    expect(parseImagePlan('{"allowed":true,"prompt":" a cat ","refusal":""}')).toEqual({ allowed: true, prompt: 'a cat' });
+    expect(parseImagePlan('{"allowed":true,"prompt":" a cat ","refusal":""}')).toEqual({
+      allowed: true,
+      mode: 'new',
+      source: null,
+      prompt: 'a cat',
+    });
+    expect(parseImagePlan('{"allowed":true,"mode":"edit","source":2,"prompt":"make it blue"}')).toEqual({
+      allowed: true,
+      mode: 'edit',
+      source: 2,
+      prompt: 'make it blue',
+    });
+    expect(parseImagePlan('{"allowed":true,"mode":"edit","source":"x","prompt":"p"}')).toMatchObject({ source: null });
     expect(parseImagePlan('{"allowed":false,"prompt":"","refusal":"No."}')).toEqual({ allowed: false, refusal: 'No.' });
     expect(parseImagePlan('{"allowed":false}')).toMatchObject({ allowed: false, refusal: expect.any(String) });
   });
@@ -503,7 +621,7 @@ describe('attachments in model messages', () => {
         role: 'user',
         content: 'Summarise',
         kind: 'text',
-        attachments: { documents: [{ name: 'a.pdf', text: 'Body' }], images: ['photo.jpg'] },
+        attachments: { documents: [{ name: 'a.pdf', text: 'Body' }], images: [{ name: 'photo.jpg' }] },
       },
       assistant('Summary.'),
     ];
@@ -513,7 +631,7 @@ describe('attachments in model messages', () => {
     const messages = draftComplete.mock.calls[0][0];
     expect(messages[1].content).toBe(
       '<attached_document name="a.pdf">\nBody\n</attached_document>\n\nSummarise' +
-        '\n\n[Images attached to this message, no longer available: photo.jpg]',
+        '\n\n[Images attached to this message, not shown here: photo.jpg]',
     );
     expect(messages[3]).toEqual({ role: 'user', content: 'And the date?' });
     expect(callsWith(REVIEW_SYSTEM_PROMPT)[0][0][1].content).not.toContain('Body');

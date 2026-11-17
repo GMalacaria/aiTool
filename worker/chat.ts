@@ -1,6 +1,7 @@
 import {
   hasAttachments,
   parseAttachments,
+  splitDataUrl,
   type Attachments,
   type DocumentAttachment,
   type StoredAttachments,
@@ -16,6 +17,7 @@ import {
   INTENT_SYSTEM_PROMPT,
   IMAGE_PROMPT_SYSTEM_PROMPT,
   IMAGE_REFUSAL_FALLBACK,
+  buildImagePlanInput,
   parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
@@ -37,6 +39,7 @@ const MAX_DEEP_OUTPUT_TOKENS = 1800;
 const MAX_DOCUMENT_OUTPUT_TOKENS = 4000;
 const MAX_INTENT_OUTPUT_TOKENS = 200;
 const MAX_IMAGE_PLAN_OUTPUT_TOKENS = 600;
+const MAX_SOURCE_IMAGES = 5;
 const LONG_TIMEOUT_MS = 90_000;
 const INTENT_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -54,6 +57,26 @@ export interface ConversationMessage {
   imageId?: string | null;
   /** 1 when the answer came from a free-tier model. */
   freeModel?: number;
+  /**
+   * Images of this message loaded from storage for the model: the user's
+   * attached images, or the image generated as this answer.
+   */
+  imageData?: LoadedImage[];
+}
+
+/** A stored image read back from R2, ready to send to a model. */
+export interface LoadedImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+  mimeType: string;
+}
+
+/** An image the user may want to edit, with how the planner sees it. */
+interface SourceImage {
+  label: string;
+  dataUrl: string;
+  mimeType: string;
 }
 
 export interface ChatRequest {
@@ -107,21 +130,37 @@ function withDocuments(text: string, documents: DocumentAttachment[]): string {
 
 /**
  * A stored message as the model should see it. User messages get their document
- * text again (images are no longer available). A document created earlier is
- * raw JSON when the model is about to write a document, so it can be changed;
- * for a text answer it is labelled, so the model does not imitate the JSON.
+ * text again and, when `withImages` and they were loaded, their images; other
+ * images are only mentioned. A document created earlier is raw JSON when the
+ * model is about to write a document, so it can be changed; for a text answer
+ * it is labelled, so the model does not imitate the JSON.
  */
-function historyContent(message: ConversationMessage, target: MessageKind): string {
-  if (message.kind === 'document') {
-    return target === 'document'
-      ? message.content
-      : `[A document was created and shown to the user. Its content, as JSON:]\n${message.content}`;
+function historyMessage(message: ConversationMessage, target: MessageKind, withImages: boolean): ChatMessage {
+  if (message.role === 'assistant') {
+    const content =
+      message.kind === 'document' && target !== 'document'
+        ? `[A document was created and shown to the user. Its content, as JSON:]\n${message.content}`
+        : message.content;
+    return { role: 'assistant', content };
   }
-  if (!message.attachments) return message.content;
-  const images = message.attachments.images.length
-    ? `\n\n[Images attached to this message, no longer available: ${message.attachments.images.join(', ')}]`
+
+  if (!message.attachments) return { role: 'user', content: message.content };
+
+  const loaded = withImages ? (message.imageData ?? []) : [];
+  const notSent = message.attachments.images.filter((image) => !loaded.some((item) => item.id === image.id));
+  const note = notSent.length
+    ? `\n\n[Images attached to this message, not shown here: ${notSent.map((image) => image.name).join(', ')}]`
     : '';
-  return withDocuments(message.content, message.attachments.documents) + images;
+  const text = withDocuments(message.content, message.attachments.documents) + note;
+
+  if (!loaded.length) return { role: 'user', content: text };
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text },
+      ...loaded.map((image): ContentPart => ({ type: 'image_url', image_url: { url: image.dataUrl } })),
+    ],
+  };
 }
 
 /** The new question, with document text inline and images as separate parts. */
@@ -140,18 +179,50 @@ function buildMessages(
   question: string,
   attachments: Attachments,
   target: MessageKind,
+  /** Send stored images again (for answers); planners only need their labels. */
+  withImages = true,
 ): ChatMessage[] {
   return [
     { role: 'system', content: systemPrompt },
-    ...truncateHistory(history).map((message) => ({ role: message.role, content: historyContent(message, target) })),
-    { role: 'user', content: questionContent(question, attachments) },
+    ...truncateHistory(history).map((message) => historyMessage(message, target, withImages)),
+    { role: 'user', content: questionContent(question, withImages ? attachments : { ...attachments, images: [] }) },
   ];
 }
 
-/** What the reviewer sees as the user's message: attachments are only mentioned. */
-function reviewQuestion(question: string, attachments: Attachments): string {
-  if (!hasAttachments(attachments)) return question;
-  return `${question}\n\n[The user attached: ${attachmentNames(attachments).join(', ')}]`;
+/** Images that an edit can start from, newest first: attached now, then earlier ones in this conversation. */
+export function sourceImages(history: ConversationMessage[], attachments: Attachments): SourceImage[] {
+  const sources: SourceImage[] = attachments.images.map((image) => ({
+    label: `attached now: ${image.name}`,
+    dataUrl: image.dataUrl,
+    mimeType: splitDataUrl(image.dataUrl)?.mimeType ?? 'image/jpeg',
+  }));
+
+  for (const message of [...truncateHistory(history)].reverse()) {
+    for (const image of message.imageData ?? []) {
+      const label =
+        message.role === 'assistant'
+          ? `generated earlier: ${message.content.replace(/^Image (generated|edited)[^:]*: /, '').slice(0, 160)}`
+          : `attached earlier: ${image.name}`;
+      sources.push({ label, dataUrl: image.dataUrl, mimeType: image.mimeType });
+    }
+  }
+  return sources.slice(0, MAX_SOURCE_IMAGES);
+}
+
+/**
+ * What the reviewer sees as the user's message: files are only mentioned, never
+ * shown, but it must know they exist, or it would "correct" facts about them.
+ */
+function reviewQuestion(question: string, attachments: Attachments, history: ConversationMessage[] = []): string {
+  const earlier = truncateHistory(history).flatMap((message) => [
+    ...(message.attachments?.documents ?? []).map((document) => document.name),
+    ...(message.imageData ?? []).map((image) => image.name),
+  ]);
+  const notes = [
+    ...(hasAttachments(attachments) ? [`[The user attached: ${attachmentNames(attachments).join(', ')}]`] : []),
+    ...(earlier.length ? [`[Files and images from earlier in the conversation, visible to the writer: ${earlier.join(', ')}]`] : []),
+  ];
+  return notes.length ? `${question}\n\n${notes.join('\n')}` : question;
 }
 
 /** True when the model will see the content of attached files, now or from earlier messages. */
@@ -178,16 +249,23 @@ export interface Routers {
     enabled: boolean;
     /** True when the text is flagged by moderation; rejects when moderation is unavailable. */
     isFlagged: (text: string) => Promise<boolean>;
+    /** The same for an image to edit (a data URL). */
+    isImageFlagged: (dataUrl: string) => Promise<boolean>;
   };
 }
 
 export type Reply =
   | { text: string; document?: undefined; image?: undefined }
   | { document: DocumentSpec; text?: undefined; image?: undefined }
-  /** An allowed image request, with the English description for the generator. */
-  | { image: { prompt: string }; text?: undefined; document?: undefined };
+  /**
+   * An allowed image request: the English description for a new picture, or the
+   * edit instruction together with the image to edit.
+   */
+  | { image: { prompt: string; source?: SourceImage }; text?: undefined; document?: undefined };
 
 export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
+export const IMAGE_NO_SOURCE_TEXT =
+  'Non trovo l’immagine da modificare in questa conversazione. Allegala di nuovo e ripeti la richiesta.';
 export const IMAGES_UNAVAILABLE_TEXT = 'La creazione di immagini non è disponibile in questo momento. Riprova più tardi.';
 
 function previousAnswer(history: ConversationMessage[]): 'text' | 'document' | 'image' {
@@ -252,10 +330,10 @@ export async function respond(
       document: await createDocument(routers.draft, history, question, attachments, routers.meter, routers.profile),
     };
   }
-  if (detected === 'image') return planImage(routers, history, question);
+  if (detected === 'image') return planImage(routers, history, question, attachments);
 
   const draft = await (speculativeDraft ?? draftText(routers, history, question, attachments));
-  return { text: await reviewText(routers, question, attachments, draft) };
+  return { text: await reviewText(routers, question, attachments, draft, history) };
 }
 
 /**
@@ -263,15 +341,24 @@ export async function respond(
  * produced unchecked: if moderation or the planner is unavailable the answer is
  * a refusal, not an unchecked image.
  */
-async function planImage(routers: Routers, history: ConversationMessage[], question: string): Promise<Reply> {
+async function planImage(
+  routers: Routers,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+): Promise<Reply> {
   const images = routers.images;
   if (!images?.enabled) return { text: IMAGES_OFF_TEXT };
+
+  // The planner sees the conversation as text (documents included) and only the labels of the images.
+  const sources = sourceImages(history, attachments);
+  const planned = buildImagePlanInput(question, sources.map((source) => source.label));
 
   try {
     if (await images.isFlagged(question)) return { text: IMAGE_REFUSAL_FALLBACK };
 
     const raw = await routers.review.complete(
-      buildMessages(IMAGE_PROMPT_SYSTEM_PROMPT, history, question, { documents: [], images: [] }, 'text'),
+      buildMessages(IMAGE_PROMPT_SYSTEM_PROMPT, history, planned, { documents: attachments.documents, images: [] }, 'text', false),
       {
         maxOutputTokens: MAX_IMAGE_PLAN_OUTPUT_TOKENS,
         meter: routers.meter,
@@ -279,7 +366,7 @@ async function planImage(routers: Routers, history: ConversationMessage[], quest
         json: true,
         fast: true,
         timeoutMs: INTENT_TIMEOUT_MS * 2,
-        containsAttachments: usesAttachments(history, { documents: [], images: [] }),
+        containsAttachments: usesAttachments(history, attachments),
       },
     );
     const plan = parseImagePlan(raw);
@@ -288,6 +375,14 @@ async function planImage(routers: Routers, history: ConversationMessage[], quest
 
     // The description sent to the generator is checked as well.
     if (await images.isFlagged(plan.prompt)) return { text: IMAGE_REFUSAL_FALLBACK };
+
+    if (plan.mode === 'edit') {
+      const source = plan.source !== null ? sources[plan.source - 1] : undefined;
+      // An edit with nothing to edit: say so instead of inventing a new picture.
+      if (!source) return { text: IMAGE_NO_SOURCE_TEXT };
+      if (await images.isImageFlagged(source.dataUrl)) return { text: IMAGE_REFUSAL_FALLBACK };
+      return { image: { prompt: plan.prompt, source } };
+    }
     return { image: { prompt: plan.prompt } };
   } catch (error) {
     console.warn('image request could not be checked', error);
@@ -316,7 +411,13 @@ function draftText(
 }
 
 /** Anti-sycophancy review of a text draft: returns the draft or its rewrite. */
-async function reviewText(routers: Routers, question: string, attachments: Attachments, draft: string): Promise<string> {
+async function reviewText(
+  routers: Routers,
+  question: string,
+  attachments: Attachments,
+  draft: string,
+  history: ConversationMessage[] = [],
+): Promise<string> {
   try {
     const review = await routers.review.complete(
       [
@@ -325,7 +426,7 @@ async function reviewText(routers: Routers, question: string, attachments: Attac
           content:
             routers.profile === 'student' ? `${REVIEW_SYSTEM_PROMPT}\n${STUDENT_REVIEW_INSTRUCTION}` : REVIEW_SYSTEM_PROMPT,
         },
-        { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments), draft) },
+        { role: 'user', content: buildReviewInput(reviewQuestion(question, attachments, history), draft) },
       ],
       {
         maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,

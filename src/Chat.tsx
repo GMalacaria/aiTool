@@ -327,13 +327,22 @@ export function Chat({
                         </span>
                       </li>
                     ))}
-                    {message.attachments.images.map((name, item) => (
-                      <li key={`image-${item}`}>
-                        <span className="attachment-name" title={name}>
-                          Immagine: {name}
-                        </span>
-                      </li>
-                    ))}
+                    {message.attachments.images.map((name, item) => {
+                      const url = message.attachments?.imageUrls?.[item];
+                      return url ? (
+                        <li key={`image-${item}`} className="attachment-thumb">
+                          <a href={url} target="_blank" rel="noopener noreferrer" title={name}>
+                            <img src={url} alt={`Immagine allegata: ${name}`} loading="lazy" />
+                          </a>
+                        </li>
+                      ) : (
+                        <li key={`image-${item}`}>
+                          <span className="attachment-name" title={name}>
+                            Immagine: {name}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </article>

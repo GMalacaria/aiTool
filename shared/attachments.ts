@@ -20,16 +20,26 @@ export interface Attachments {
   images: ImageAttachment[];
 }
 
-/** What is kept with the conversation: document text, and only the names of images. */
-export interface StoredAttachments {
-  documents: DocumentAttachment[];
-  images: string[];
+/** An attached image as kept with the message: the file is in R2 under `id`. */
+export interface StoredImage {
+  name: string;
+  /** Absent for messages from before attached images were stored. */
+  id?: string;
+  mimeType?: string;
 }
 
-/** What the client needs to show a past message. */
+/** What is kept with the conversation: document text, and the attached images (files in R2). */
+export interface StoredAttachments {
+  documents: DocumentAttachment[];
+  images: StoredImage[];
+}
+
+/** What the client needs to show a message's attachments. */
 export interface AttachmentNames {
   documents: string[];
   images: string[];
+  /** Where to load each image from (same order as `images`), when it is available. */
+  imageUrls?: (string | null)[];
 }
 
 export const ATTACHMENT_LIMITS = {
@@ -94,8 +104,18 @@ export function hasAttachments(attachments: Attachments | StoredAttachments | At
   return attachments.documents.length > 0 || attachments.images.length > 0;
 }
 
-export function toStored(attachments: Attachments): StoredAttachments {
-  return { documents: attachments.documents, images: attachments.images.map((image) => image.name) };
+/** `imageFiles` are the R2 entries of the attached images, in the same order. */
+export function toStored(attachments: Attachments, imageFiles: { id: string; mimeType: string }[] = []): StoredAttachments {
+  return {
+    documents: attachments.documents,
+    images: attachments.images.map((image, index) => ({ name: image.name, ...imageFiles[index] })),
+  };
+}
+
+/** Splits a base64 data URL into its MIME type and base64 payload. */
+export function splitDataUrl(dataUrl: string): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl);
+  return match ? { mimeType: match[1], data: match[2] } : null;
 }
 
 /** Reads back what was stored with a message; tolerant, because it is our own data. */
@@ -111,9 +131,18 @@ export function parseStoredAttachments(json: string | null): StoredAttachments |
         typeof entry.name === 'string' && typeof entry.text === 'string',
       )
       .map((entry) => ({ name: entry.name, text: entry.text }));
-    const images = (Array.isArray(value.images) ? value.images : []).filter(
-      (entry): entry is string => typeof entry === 'string',
-    );
+    // Older messages stored only the names.
+    const images = (Array.isArray(value.images) ? value.images : []).flatMap((entry): StoredImage[] => {
+      if (typeof entry === 'string') return [{ name: entry }];
+      if (!isObject(entry) || typeof entry.name !== 'string') return [];
+      return [
+        {
+          name: entry.name,
+          ...(typeof entry.id === 'string' ? { id: entry.id } : {}),
+          ...(typeof entry.mimeType === 'string' ? { mimeType: entry.mimeType } : {}),
+        },
+      ];
+    });
 
     const stored = { documents, images };
     return hasAttachments(stored) ? stored : null;

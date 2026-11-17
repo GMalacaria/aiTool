@@ -106,13 +106,15 @@ function fakeImage(prompt) {
 }
 
 function imageCompletion(res, raw) {
-  const prompt = JSON.parse(raw || '{}').contents?.[0]?.parts?.[0]?.text ?? '';
-  console.log(`image -> ${prompt}`);
+  const parts = JSON.parse(raw || '{}').contents?.[0]?.parts ?? [];
+  const prompt = parts.find((part) => typeof part.text === 'string')?.text ?? '';
+  const source = parts.find((part) => part.inlineData)?.inlineData;
+  console.log(`image -> ${source ? `EDIT of ${source.mimeType} (${source.data.length} base64 chars): ` : 'NEW: '}${prompt}`);
   // A prompt containing "BLOCKED" simulates the model's own safety filter: no picture comes back.
-  const parts = prompt.includes('BLOCKED')
+  const reply = prompt.includes('BLOCKED')
     ? [{ text: 'I cannot create this image.' }]
     : [{ text: 'Here it is.' }, { inlineData: { mimeType: 'image/png', data: fakeImage(prompt).toString('base64') } }];
-  json(res, 200, { candidates: [{ content: { parts } }] });
+  json(res, 200, { candidates: [{ content: { parts: reply } }] });
 }
 
 function authorizePage(res, url) {
