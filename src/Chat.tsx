@@ -19,6 +19,11 @@ interface ChatProps {
   imagesEnabled: boolean;
   imageRemaining: number;
   imageLimit: number;
+  /** Paid tokens used today and the daily budget; past it only free models answer. */
+  tokensUsed: number;
+  tokenLimit: number;
+  freeMode: boolean;
+  freeAvailable: boolean;
   /** Resolves to false when the message was not sent. */
   onSend: (content: string, attachments: Attachments, deep: boolean) => Promise<boolean>;
 }
@@ -35,6 +40,10 @@ export function Chat({
   imagesEnabled,
   imageRemaining,
   imageLimit,
+  tokensUsed,
+  tokenLimit,
+  freeMode,
+  freeAvailable,
   onSend,
 }: ChatProps) {
   const [draft, setDraft] = useState('');
@@ -50,7 +59,8 @@ export function Chat({
   }, [messages, pending]);
 
   const limitReached = remaining <= 0;
-  const deep = deepRequested && deepRemaining > 0;
+  // In-depth answers need the paid model.
+  const deep = deepRequested && deepRemaining > 0 && !freeMode;
   const cannotSend = pending || reading || limitReached || !draft.trim();
 
   async function send() {
@@ -128,7 +138,10 @@ export function Chat({
               ) : (
                 <p>{message.content}</p>
               )}
-              {message.attachments && hasAttachments(message.attachments) && (
+              {message.role === 'assistant' && message.freeModel && (
+              <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
+            )}
+            {message.attachments && hasAttachments(message.attachments) && (
                 <ul className="attachments" aria-label="Allegati">
                   {message.attachments.documents.map((name, item) => (
                     <li key={`document-${item}`}>Documento: {name}</li>
@@ -161,6 +174,13 @@ export function Chat({
           </p>
         )}
         {limitReached && !error && <p className="muted">Limite giornaliero raggiunto, torna domani.</p>}
+        {freeMode && !limitReached && (
+          <p className="notice" role="status">
+            {freeAvailable
+              ? 'Hai esaurito i token giornalieri: fino a mezzanotte rispondono modelli gratuiti, meno accurati. Risposte approfondite e lettura di allegati non sono disponibili.'
+              : 'Hai esaurito i token giornalieri. Torna domani.'}
+          </p>
+        )}
 
         {hasAttachments(attachments) && (
           <ul className="attachments attachments-pending" aria-label="Allegati da inviare">
@@ -210,7 +230,7 @@ export function Chat({
           <input
             type="checkbox"
             checked={deep}
-            disabled={limitReached || deepRemaining <= 0}
+            disabled={limitReached || deepRemaining <= 0 || freeMode}
             onChange={(event) => setDeepRequested(event.target.checked)}
           />
           <span>
@@ -221,6 +241,7 @@ export function Chat({
           <span className="muted">
             Messaggi rimasti oggi: {remaining} di {dailyLimit}
             {imagesEnabled && imageLimit > 0 && ` · Immagini: ${imageRemaining} di ${imageLimit}`}
+            {` · Token: ${Math.min(100, tokenLimit > 0 ? Math.round((tokensUsed / tokenLimit) * 100) : 100)}% usati`}
           </span>
           <div className="chat-form-buttons">
             <input

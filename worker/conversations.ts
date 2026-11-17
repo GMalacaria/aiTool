@@ -38,11 +38,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId, free_model AS freeModel FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content, kind, attachments, imageId FROM (
-               SELECT id, role, content, kind, attachments, image_id AS imageId FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT role, content, kind, attachments, imageId, freeModel FROM (
+               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -62,10 +62,12 @@ export async function saveExchange(
   attachments: StoredAttachments | null = null,
   /** A generated image shown with the answer; its file is already in R2. */
   image: { id: string; mimeType: string } | null = null,
+  /** The answer was written by a free-tier model. */
+  freeModel = false,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
-    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
 
   await db.batch([
@@ -79,8 +81,8 @@ export async function saveExchange(
             .bind(image.id, user.id, id, image.mimeType),
         ]
       : []),
-    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null),
-    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0),
+    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null, freeModel ? 1 : 0),
   ]);
 
   const conversation = await findConversation(db, user, id);

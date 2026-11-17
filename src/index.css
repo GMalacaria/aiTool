@@ -299,11 +299,8 @@ textarea {
 }
 
 .users-list li {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 0.75rem;
-  align-items: end;
-  justify-content: space-between;
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
@@ -643,4 +640,92 @@ textarea {
 
 .generated-image a {
   color: var(--accent);
+}
+
+.user-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.user-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+.user-settings label {
+  display: grid;
+  gap: 0.15rem;
+}
+
+select {
+  width: 100%;
+  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--background);
+  font: inherit;
+  color: inherit;
+}
+
+.user-usage {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.user-usage div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.user-usage dt {
+  color: var(--muted);
+}
+
+.user-usage dt::after {
+  content: ':';
+}
+
+.user-usage dd {
+  margin: 0;
+}
+
+.usage-table table {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  text-align: right;
+}
+
+.usage-table th[scope='row'],
+.usage-table thead th:first-child {
+  text-align: left;
+}
+
+/* Free-tier notices */
+
+.notice {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+
+.free-model-note {
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
 }

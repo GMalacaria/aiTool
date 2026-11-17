@@ -32,17 +32,24 @@ export interface Env {
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
 
+/** 'student': the tool guides towards the solution instead of giving it. */
+export type Profile = 'professional' | 'student';
+export const PROFILES: Profile[] = ['professional', 'student'];
+
 export interface User {
   id: number;
   email: string;
   name: string;
   status: UserStatus;
+  profile: Profile;
   isAdmin: boolean;
   dailyMessageLimit: number;
   /** Daily allowance of in-depth answers, on top of the general limit. */
   dailyDeepLimit: number;
   /** Daily allowance of generated images. */
   dailyImageLimit: number;
+  /** Paid-model tokens per day; beyond it only free-tier models answer. */
+  dailyTokenLimit: number;
 }
 
 export type AppEnv = {

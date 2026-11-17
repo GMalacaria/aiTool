@@ -29,8 +29,9 @@ import {
   listMessages,
   saveExchange,
 } from './conversations';
-import type { AppEnv, UserStatus } from './env';
-import { getRouter } from './llm/providers';
+import { PROFILES, type AppEnv, type UserStatus } from './env';
+import { getRouter, hasFreeProviders } from './llm/providers';
+import { UsageMeter } from './meter';
 import { AllProvidersFailedError } from './llm/router';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
 import {
@@ -40,7 +41,9 @@ import {
   currentDay,
   getUsedDeepMessages,
   getUsedImages,
+  getPaidTokens,
   getUsedMessages,
+  recordUsage,
   refundDeepMessage,
   refundImage,
   refundMessage,
@@ -59,11 +62,12 @@ function toClientMessage(message: ConversationMessage) {
     ? { documents: message.attachments.documents.map((entry) => entry.name), images: message.attachments.images }
     : undefined;
 
+  const freeModel = message.freeModel ? true : undefined;
   if (message.imageId) return { role: message.role, content: '', image: { id: message.imageId } };
 
   return document
-    ? { role: message.role, content: document.title, document }
-    : { role: message.role, content: message.content, attachments };
+    ? { role: message.role, content: document.title, document, freeModel }
+    : { role: message.role, content: message.content, attachments, freeModel };
 }
 
 app.use(requireSameOrigin);
@@ -128,6 +132,7 @@ app.get('/me', requireUser, async (c) => {
   const used = approved ? await getUsedMessages(c.env.DB, user, currentDay()) : 0;
   const deepUsed = approved ? await getUsedDeepMessages(c.env.DB, user, currentDay()) : 0;
   const imagesUsed = approved ? await getUsedImages(c.env.DB, user, currentDay()) : 0;
+  const tokensUsed = approved ? await getPaidTokens(c.env.DB, user, currentDay()) : 0;
   return c.json({
     name: user.name,
     email: user.email,
@@ -140,6 +145,11 @@ app.get('/me', requireUser, async (c) => {
     imagesEnabled: imagesEnabled(c.env),
     imageLimit: user.dailyImageLimit,
     imageRemaining: Math.max(0, user.dailyImageLimit - imagesUsed),
+    profile: user.profile,
+    tokenLimit: user.dailyTokenLimit,
+    tokensUsed,
+    freeMode: tokensUsed >= user.dailyTokenLimit,
+    freeAvailable: hasFreeProviders(c.env),
   });
 });
 
@@ -213,11 +223,22 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     });
   }
 
+  // Past the daily budget of paid tokens only free-tier models answer; without them, nothing does.
+  const paidTokensBefore = await getPaidTokens(db, user, day);
+  const freeMode = paidTokensBefore >= user.dailyTokenLimit;
+  if (freeMode && !hasFreeProviders(c.env)) return c.json({ error: 'tokens_exhausted' }, 429);
+
   const used = await consumeMessage(db, user, day);
   if (used === null) return c.json({ error: 'daily_limit_reached' }, 429);
 
-  // In-depth answers come from a separate allowance; without it the answer is a standard one.
-  let deep = request.deep && (await consumeDeepMessage(db, user, day)) !== null;
+  // In-depth answers come from a separate allowance, and need the paid model.
+  let deep = !freeMode && request.deep && (await consumeDeepMessage(db, user, day)) !== null;
+  const meter = new UsageMeter();
+  let usageKind: 'text' | 'deep' | 'document' | 'image' | 'error' = 'error';
+  const saveUsage = () =>
+    recordUsage(db, user, day, usageKind, freeMode ? 'free' : 'paid', meter).catch((error: unknown) =>
+      console.error('usage not recorded', error),
+    );
 
   let imageTaken = false;
   let storedImageId: string | null = null;
@@ -230,9 +251,11 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     const generate = (useDeep: boolean) =>
       respond(
         {
-          draft: getRouter(c.env, useDeep ? 'deep' : 'standard'),
-          review: getRouter(c.env),
+          draft: getRouter(c.env, useDeep ? 'deep' : 'standard', freeMode),
+          review: getRouter(c.env, 'standard', freeMode),
           deep: useDeep,
+          meter,
+          profile: user.profile,
           images: { enabled: imagesEnabled(c.env), isFlagged: (text) => isFlagged(c.env, text) },
         },
         history,
@@ -270,6 +293,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
       try {
         const generated = await generateImage(c.env, result.image.prompt);
+        meter.addImage();
         imageId = crypto.randomUUID();
         storedImageId = imageId;
         await c.env.IMAGES.put(imageId, generated.bytes, { httpMetadata: { contentType: generated.mimeType } });
@@ -282,6 +306,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
           'text',
           stored,
           { id: imageId, mimeType: generated.mimeType },
+          meter.answeredByFreeModel,
         );
         storedImageId = null;
       } catch (error) {
@@ -296,10 +321,14 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     }
 
     if (!conversation) {
+      const free = meter.answeredByFreeModel;
       conversation = result.document
-        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored);
+        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free)
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free);
     }
+
+    usageKind = imageId ? 'image' : result.document ? 'document' : deep ? 'deep' : 'text';
+    await saveUsage();
 
     return c.json({
       answer: result.document ? result.document.title : result.text,
@@ -309,10 +338,17 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),
       imageRemaining: Math.max(0, user.dailyImageLimit - (await getUsedImages(db, user, day))),
+      freeMode,
+      answeredByFreeModel: meter.answeredByFreeModel,
+      tokensUsed: paidTokensBefore + meter.paidTokens,
+      tokenLimit: user.dailyTokenLimit,
       conversation,
     });
   } catch (error) {
     console.error('chat failed', error);
+    // Tokens spent before the failure are real cost: they are recorded too.
+    usageKind = 'error';
+    await saveUsage();
     await refundMessage(db, user, day);
     if (deep) await refundDeepMessage(db, user, day);
     if (imageTaken) await refundImage(db, user, day);
@@ -322,6 +358,10 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
     if (error instanceof AllProvidersFailedError && error.attachmentsSkipped) {
       return c.json({ error: 'attachments_unavailable' }, 503);
     }
+    // Every model is out of quota: in free mode that means the free tiers are used up too.
+    if (error instanceof AllProvidersFailedError && error.rateLimited) {
+      return c.json({ error: freeMode ? 'free_quota_exhausted' : 'quota_exhausted' }, 429);
+    }
     return c.json({ error: 'service_unavailable' }, 503);
   }
 });
@@ -329,12 +369,56 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 // --- Administration ----------------------------------------------------------
 
 app.get('/admin/users', requireUser, requireAdmin, async (c) => {
+  const day = currentDay();
+  const monthStart = `${day.slice(0, 7)}-01`;
   const { results } = await c.env.DB.prepare(
-    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, daily_deep_limit AS deepLimit, daily_image_limit AS imageLimit,
-            created_at AS createdAt
-     FROM users ORDER BY status = 'pending' DESC, created_at DESC`,
-  ).all<{ email: string }>();
+    `SELECT u.id, u.email, u.name, u.status, u.profile,
+            u.daily_message_limit AS dailyLimit, u.daily_deep_limit AS deepLimit,
+            u.daily_image_limit AS imageLimit, u.daily_token_limit AS tokenLimit,
+            u.created_at AS createdAt,
+            COALESCE(d.messages, 0) AS todayMessages, COALESCE(d.paid_tokens, 0) AS todayPaidTokens,
+            COALESCE(d.images, 0) AS todayImages,
+            COALESCE(m.cost, 0) AS monthCostMicroUsd, COALESCE(m.requests, 0) AS monthRequests,
+            COALESCE(m.free_tokens, 0) AS monthFreeTokens
+     FROM users u
+     LEFT JOIN daily_usage d ON d.user_id = u.id AND d.day = ?1
+     LEFT JOIN (
+       SELECT user_id, SUM(cost_micro_usd) AS cost, COUNT(*) AS requests,
+              SUM(free_input_tokens + free_output_tokens) AS free_tokens
+       FROM usage_events WHERE day >= ?2 GROUP BY user_id
+     ) m ON m.user_id = u.id
+     ORDER BY u.status = 'pending' DESC, u.created_at DESC`,
+  )
+    .bind(day, monthStart)
+    .all<{ email: string }>();
   return c.json({ users: results.map((row) => ({ ...row, isAdmin: isAdminEmail(c.env, row.email) })) });
+});
+
+/** Day-by-day usage of one user, newest first. */
+app.get('/admin/users/:id/usage', requireUser, requireAdmin, async (c) => {
+  const id = Number(c.req.param('id'));
+  const days = Math.min(Math.max(Number(c.req.query('days')) || 30, 1), 366);
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid_request' }, 400);
+
+  const since = new Date(Date.now() - (days - 1) * 86_400_000);
+  const { results } = await c.env.DB.prepare(
+    `SELECT day,
+            COUNT(*) AS requests,
+            SUM(CASE WHEN kind = 'text' THEN 1 ELSE 0 END) AS text,
+            SUM(CASE WHEN kind = 'deep' THEN 1 ELSE 0 END) AS deep,
+            SUM(CASE WHEN kind = 'document' THEN 1 ELSE 0 END) AS documents,
+            SUM(images) AS images,
+            SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
+            SUM(CASE WHEN mode = 'free' THEN 1 ELSE 0 END) AS freeModeRequests,
+            SUM(paid_input_tokens + paid_output_tokens) AS paidTokens,
+            SUM(free_input_tokens + free_output_tokens) AS freeTokens,
+            SUM(cost_micro_usd) AS costMicroUsd
+     FROM usage_events WHERE user_id = ? AND day >= ?
+     GROUP BY day ORDER BY day DESC`,
+  )
+    .bind(id, currentDay(since))
+    .all();
+  return c.json({ days: results });
 });
 
 app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
@@ -344,6 +428,8 @@ app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
     dailyLimit?: unknown;
     deepLimit?: unknown;
     imageLimit?: unknown;
+    tokenLimit?: unknown;
+    profile?: unknown;
   };
 
   const target = Number.isInteger(id)
@@ -358,17 +444,21 @@ app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
   const dailyLimit = limit(body.dailyLimit, 500);
   const deepLimit = limit(body.deepLimit, 100);
   const imageLimit = limit(body.imageLimit, 50);
+  const tokenLimit = limit(body.tokenLimit, 10_000_000);
+  const profile = PROFILES.find((candidate) => candidate === body.profile) ?? null;
 
-  if (!status && dailyLimit === null && deepLimit === null && imageLimit === null) return c.json({ error: 'invalid_request' }, 400);
+  if (!status && dailyLimit === null && deepLimit === null && imageLimit === null && tokenLimit === null && !profile) return c.json({ error: 'invalid_request' }, 400);
 
   await c.env.DB.prepare(
     `UPDATE users SET status = COALESCE(?1, status),
        daily_message_limit = COALESCE(?2, daily_message_limit),
        daily_deep_limit = COALESCE(?3, daily_deep_limit),
-       daily_image_limit = COALESCE(?4, daily_image_limit)
-     WHERE id = ?5`,
+       daily_image_limit = COALESCE(?4, daily_image_limit),
+       daily_token_limit = COALESCE(?5, daily_token_limit),
+       profile = COALESCE(?6, profile)
+     WHERE id = ?7`,
   )
-    .bind(status ?? null, dailyLimit, deepLimit, imageLimit, id)
+    .bind(status ?? null, dailyLimit, deepLimit, imageLimit, tokenLimit, profile, id)
     .run();
 
   // A user who is no longer approved loses the open sessions too.
