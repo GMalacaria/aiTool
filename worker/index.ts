@@ -15,12 +15,16 @@ import {
   upsertUser,
 } from './auth/session';
 import { hasAttachments, toStored } from '../shared/attachments';
+import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
 import { MAX_HISTORY_MESSAGES, parseChatRequest, respond, type ConversationMessage } from './chat';
+import { generateImage, ImageNotProducedError, imagesEnabled, isFlagged } from './images';
 import {
+  deleteAccount,
   deleteAllConversations,
   deleteConversation,
   findConversation,
+  findImage,
   listConversations,
   listMessages,
   saveExchange,
@@ -31,11 +35,14 @@ import { AllProvidersFailedError } from './llm/router';
 import { detectSensitiveTopic, sensitiveTopicResponse } from './sensitive';
 import {
   consumeDeepMessage,
+  consumeImage,
   consumeMessage,
   currentDay,
   getUsedDeepMessages,
+  getUsedImages,
   getUsedMessages,
   refundDeepMessage,
+  refundImage,
   refundMessage,
 } from './usage';
 
@@ -51,6 +58,8 @@ function toClientMessage(message: ConversationMessage) {
   const attachments = message.attachments
     ? { documents: message.attachments.documents.map((entry) => entry.name), images: message.attachments.images }
     : undefined;
+
+  if (message.imageId) return { role: message.role, content: '', image: { id: message.imageId } };
 
   return document
     ? { role: message.role, content: document.title, document }
@@ -118,6 +127,7 @@ app.get('/me', requireUser, async (c) => {
   const approved = user.status === 'approved';
   const used = approved ? await getUsedMessages(c.env.DB, user, currentDay()) : 0;
   const deepUsed = approved ? await getUsedDeepMessages(c.env.DB, user, currentDay()) : 0;
+  const imagesUsed = approved ? await getUsedImages(c.env.DB, user, currentDay()) : 0;
   return c.json({
     name: user.name,
     email: user.email,
@@ -127,12 +137,15 @@ app.get('/me', requireUser, async (c) => {
     remaining: Math.max(0, user.dailyMessageLimit - used),
     deepLimit: user.dailyDeepLimit,
     deepRemaining: Math.max(0, user.dailyDeepLimit - deepUsed),
+    imagesEnabled: imagesEnabled(c.env),
+    imageLimit: user.dailyImageLimit,
+    imageRemaining: Math.max(0, user.dailyImageLimit - imagesUsed),
   });
 });
 
 /** Deletes the account with everything attached to it (sessions, usage, conversations). */
 app.delete('/me', requireUser, async (c) => {
-  await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(c.get('user').id).run();
+  await deleteAccount(c.env.DB, c.env.IMAGES, c.get('user'));
   deleteCookie(c, SESSION_COOKIE, { path: '/' });
   return c.json({ ok: true });
 });
@@ -144,7 +157,7 @@ app.get('/conversations', requireUser, requireApproved, async (c) => {
 });
 
 app.delete('/conversations', requireUser, requireApproved, async (c) => {
-  await deleteAllConversations(c.env.DB, c.get('user'));
+  await deleteAllConversations(c.env.DB, c.env.IMAGES, c.get('user'));
   return c.json({ ok: true });
 });
 
@@ -156,8 +169,25 @@ app.get('/conversations/:id', requireUser, requireApproved, async (c) => {
 });
 
 app.delete('/conversations/:id', requireUser, requireApproved, async (c) => {
-  await deleteConversation(c.env.DB, c.get('user'), c.req.param('id'));
+  await deleteConversation(c.env.DB, c.env.IMAGES, c.get('user'), c.req.param('id'));
   return c.json({ ok: true });
+});
+
+/** A generated image, only for its owner. The bytes are never shared or cached publicly. */
+app.get('/images/:id', requireUser, requireApproved, async (c) => {
+  const id = c.req.param('id');
+  const image = await findImage(c.env.DB, c.get('user'), id);
+  const object = image ? await c.env.IMAGES.get(id) : null;
+  if (!image || !object) return c.json({ error: 'not_found' }, 404);
+
+  return new Response(object.body, {
+    headers: {
+      'Content-Type': image.mimeType,
+      'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    },
+  });
 });
 
 app.post('/chat', requireUser, requireApproved, async (c) => {
@@ -189,6 +219,9 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
   // In-depth answers come from a separate allowance; without it the answer is a standard one.
   let deep = request.deep && (await consumeDeepMessage(db, user, day)) !== null;
 
+  let imageTaken = false;
+  let storedImageId: string | null = null;
+
   try {
     const history = request.conversationId ? await listMessages(db, request.conversationId, MAX_HISTORY_MESSAGES) : [];
     const { attachments } = request;
@@ -196,7 +229,12 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
     const generate = (useDeep: boolean) =>
       respond(
-        { draft: getRouter(c.env, useDeep ? 'deep' : 'standard'), review: getRouter(c.env), deep: useDeep },
+        {
+          draft: getRouter(c.env, useDeep ? 'deep' : 'standard'),
+          review: getRouter(c.env),
+          deep: useDeep,
+          images: { enabled: imagesEnabled(c.env), isFlagged: (text) => isFlagged(c.env, text) },
+        },
         history,
         request.message,
         attachments,
@@ -214,22 +252,72 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       result = await generate(false);
     }
 
-    const conversation = result.document
-      ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored)
-      : await saveExchange(db, user, request.conversationId, request.message, result.text, 'text', stored);
+    // An image request does not use the in-depth allowance.
+    if (result.image && deep) {
+      await refundDeepMessage(db, user, day);
+      deep = false;
+    }
+
+    let conversation;
+    let imageId: string | null = null;
+
+    if (result.image) {
+      if ((await consumeImage(db, user, day)) === null) {
+        await refundMessage(db, user, day);
+        return c.json({ error: 'image_limit_reached' }, 429);
+      }
+      imageTaken = true;
+
+      try {
+        const generated = await generateImage(c.env, result.image.prompt);
+        imageId = crypto.randomUUID();
+        storedImageId = imageId;
+        await c.env.IMAGES.put(imageId, generated.bytes, { httpMetadata: { contentType: generated.mimeType } });
+        conversation = await saveExchange(
+          db,
+          user,
+          request.conversationId,
+          request.message,
+          imageMessageContent(result.image.prompt),
+          'text',
+          stored,
+          { id: imageId, mimeType: generated.mimeType },
+        );
+        storedImageId = null;
+      } catch (error) {
+        if (!(error instanceof ImageNotProducedError)) throw error;
+        // The model refused or returned no picture (its own safety filters): a normal answer, no image used.
+        console.warn('image not produced', error);
+        await refundImage(db, user, day);
+        imageTaken = false;
+        imageId = null;
+        result = { text: IMAGE_REFUSAL_FALLBACK };
+      }
+    }
+
+    if (!conversation) {
+      conversation = result.document
+        ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored)
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored);
+    }
 
     return c.json({
       answer: result.document ? result.document.title : result.text,
       document: result.document,
+      image: imageId ? { id: imageId } : undefined,
       deep,
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),
+      imageRemaining: Math.max(0, user.dailyImageLimit - (await getUsedImages(db, user, day))),
       conversation,
     });
   } catch (error) {
     console.error('chat failed', error);
     await refundMessage(db, user, day);
     if (deep) await refundDeepMessage(db, user, day);
+    if (imageTaken) await refundImage(db, user, day);
+    // The picture was stored but the exchange was not: do not leave the file behind.
+    if (storedImageId) await c.env.IMAGES.delete(storedImageId).catch(() => undefined);
     // Only a provider that may not see attachments was left: say so, the user can retry without files.
     if (error instanceof AllProvidersFailedError && error.attachmentsSkipped) {
       return c.json({ error: 'attachments_unavailable' }, 503);
@@ -242,7 +330,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
 
 app.get('/admin/users', requireUser, requireAdmin, async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, daily_deep_limit AS deepLimit,
+    `SELECT id, email, name, status, daily_message_limit AS dailyLimit, daily_deep_limit AS deepLimit, daily_image_limit AS imageLimit,
             created_at AS createdAt
      FROM users ORDER BY status = 'pending' DESC, created_at DESC`,
   ).all<{ email: string }>();
@@ -255,6 +343,7 @@ app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
     status?: unknown;
     dailyLimit?: unknown;
     deepLimit?: unknown;
+    imageLimit?: unknown;
   };
 
   const target = Number.isInteger(id)
@@ -268,16 +357,18 @@ app.patch('/admin/users/:id', requireUser, requireAdmin, async (c) => {
     typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : null;
   const dailyLimit = limit(body.dailyLimit, 500);
   const deepLimit = limit(body.deepLimit, 100);
+  const imageLimit = limit(body.imageLimit, 50);
 
-  if (!status && dailyLimit === null && deepLimit === null) return c.json({ error: 'invalid_request' }, 400);
+  if (!status && dailyLimit === null && deepLimit === null && imageLimit === null) return c.json({ error: 'invalid_request' }, 400);
 
   await c.env.DB.prepare(
     `UPDATE users SET status = COALESCE(?1, status),
        daily_message_limit = COALESCE(?2, daily_message_limit),
-       daily_deep_limit = COALESCE(?3, daily_deep_limit)
-     WHERE id = ?4`,
+       daily_deep_limit = COALESCE(?3, daily_deep_limit),
+       daily_image_limit = COALESCE(?4, daily_image_limit)
+     WHERE id = ?5`,
   )
-    .bind(status ?? null, dailyLimit, deepLimit, id)
+    .bind(status ?? null, dailyLimit, deepLimit, imageLimit, id)
     .run();
 
   // A user who is no longer approved loses the open sessions too.

@@ -35,7 +35,7 @@ describe('reminderAfter', () => {
 describe('Chat reminder', () => {
   const render = (messages: ConversationMessage[]) =>
     renderToStaticMarkup(
-      <Chat messages={messages} pending={false} error={null} remaining={5} dailyLimit={15} deepRemaining={1} onSend={async () => true} />,
+      <Chat messages={messages} pending={false} error={null} remaining={5} dailyLimit={15} deepRemaining={1} imagesEnabled={false} imageRemaining={0} imageLimit={3} onSend={async () => true} />,
     );
 
   it('shows the reminder once per block of questions', () => {

@@ -622,3 +622,25 @@ textarea {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+/* Generated images */
+
+.generated-image {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.generated-image img {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface);
+}
+
+.generated-image a {
+  color: var(--accent);
+}

@@ -31,6 +31,7 @@ interface UserRow {
   status: UserStatus;
   daily_message_limit: number;
   daily_deep_limit: number;
+  daily_image_limit: number;
 }
 
 function toUser(env: Env, row: UserRow): User {
@@ -44,6 +45,7 @@ function toUser(env: Env, row: UserRow): User {
     isAdmin,
     dailyMessageLimit: row.daily_message_limit,
     dailyDeepLimit: row.daily_deep_limit,
+    dailyImageLimit: row.daily_image_limit,
   };
 }
 
@@ -52,7 +54,7 @@ export async function upsertUser(env: Env, profile: GoogleProfile): Promise<User
   const row = await env.DB.prepare(
     `INSERT INTO users (google_sub, email, name, status) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT (google_sub) DO UPDATE SET email = excluded.email, name = excluded.name
-     RETURNING id, email, name, status, daily_message_limit, daily_deep_limit`,
+     RETURNING id, email, name, status, daily_message_limit, daily_deep_limit, daily_image_limit`,
   )
     .bind(profile.sub, profile.email, profile.name, isAdminEmail(env, profile.email) ? 'approved' : 'pending')
     .first<UserRow>();
@@ -81,7 +83,7 @@ export async function deleteSession(db: D1Database, token: string): Promise<void
 
 export async function findUserBySession(env: Env, token: string, now: number = Date.now()): Promise<User | null> {
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.status, u.daily_message_limit, u.daily_deep_limit
+    `SELECT u.id, u.email, u.name, u.status, u.daily_message_limit, u.daily_deep_limit, u.daily_image_limit
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   )

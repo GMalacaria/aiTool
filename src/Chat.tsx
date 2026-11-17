@@ -3,6 +3,7 @@ import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/a
 import type { ConversationMessage } from './api';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
+import { GeneratedImage } from './GeneratedImage';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
 
@@ -14,13 +15,28 @@ interface ChatProps {
   dailyLimit: number;
   /** In-depth answers left today. */
   deepRemaining: number;
+  /** Image generation is on, and how many images are left today. */
+  imagesEnabled: boolean;
+  imageRemaining: number;
+  imageLimit: number;
   /** Resolves to false when the message was not sent. */
   onSend: (content: string, attachments: Attachments, deep: boolean) => Promise<boolean>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
 
-export function Chat({ messages, pending, error, remaining, dailyLimit, deepRemaining, onSend }: ChatProps) {
+export function Chat({
+  messages,
+  pending,
+  error,
+  remaining,
+  dailyLimit,
+  deepRemaining,
+  imagesEnabled,
+  imageRemaining,
+  imageLimit,
+  onSend,
+}: ChatProps) {
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<Attachments>(EMPTY_ATTACHMENTS);
   const [notes, setNotes] = useState<string[]>([]);
@@ -95,8 +111,8 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
       <main className="chat-messages" aria-live="polite">
         {messages.length === 0 && (
           <p className="muted">
-            Scrivi una domanda. Puoi anche allegare immagini o PDF. Per ottenere un file da scaricare, chiedilo in modo
-            esplicito, ad esempio «fammi un PDF…» o «crea un documento Excel…».
+            Scrivi una domanda. Puoi anche allegare immagini o PDF. Per ottenere un file da scaricare o un'immagine, chiedilo
+            in modo esplicito, ad esempio «fammi un PDF…», «crea un documento Excel…» o «genera un'immagine di…».
           </p>
         )}
         {messages.map((message, index) => (
@@ -105,6 +121,8 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
               <h2>{message.role === 'user' ? 'Domanda' : message.document ? 'Documento' : 'Risposta'}</h2>
               {message.document ? (
                 <DocumentView document={message.document} />
+              ) : message.image ? (
+                <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
               ) : message.role === 'assistant' ? (
                 <Markdown text={message.content} />
               ) : (
@@ -202,6 +220,7 @@ export function Chat({ messages, pending, error, remaining, dailyLimit, deepRema
         <div className="chat-form-footer">
           <span className="muted">
             Messaggi rimasti oggi: {remaining} di {dailyLimit}
+            {imagesEnabled && imageLimit > 0 && ` · Immagini: ${imageRemaining} di ${imageLimit}`}
           </span>
           <div className="chat-form-buttons">
             <input

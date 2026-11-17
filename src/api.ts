@@ -13,6 +13,10 @@ export interface Account {
   /** Daily allowance of in-depth answers. */
   deepLimit: number;
   deepRemaining: number;
+  /** Image generation is configured on the server. */
+  imagesEnabled: boolean;
+  imageLimit: number;
+  imageRemaining: number;
 }
 
 export interface ConversationMessage {
@@ -20,6 +24,8 @@ export interface ConversationMessage {
   /** For document answers, the document title. */
   content: string;
   document?: DocumentSpec;
+  /** A generated image shown with the answer. */
+  image?: { id: string };
   /** Names of the files attached to a question. */
   attachments?: AttachmentNames;
 }
@@ -34,6 +40,9 @@ export interface ChatResult {
   answer: string;
   /** Absent on fixed answers, which do not touch the allowances. */
   deepRemaining?: number;
+  imageRemaining?: number;
+  /** Present when the answer is a generated image. */
+  image?: { id: string };
   /** Present when the answer is a document. */
   document?: DocumentSpec;
   remaining: number;
@@ -49,6 +58,7 @@ export interface ManagedUser {
   isAdmin: boolean;
   dailyLimit: number;
   deepLimit: number;
+  imageLimit: number;
   createdAt: string;
 }
 
@@ -58,6 +68,7 @@ const KNOWN_ERRORS = [
   'forbidden',
   'not_found',
   'daily_limit_reached',
+  'image_limit_reached',
   'service_unavailable',
   'attachments_unavailable',
   'invalid_request',
@@ -91,6 +102,8 @@ async function request<T>(path: string, method = 'GET', payload?: unknown): Prom
   return body as T;
 }
 
+export const imageUrl = (id: string) => `/api/images/${encodeURIComponent(id)}`;
+
 export const SIGN_IN_URL = '/api/auth/google/start';
 
 export const fetchAccount = () => request<Account>('/me');
@@ -112,5 +125,5 @@ export const sendMessage = (
 ) => request<ChatResult>('/chat', 'POST', { conversationId, message, attachments, deep });
 
 export const fetchUsers = () => request<{ users: ManagedUser[] }>('/admin/users').then((body) => body.users);
-export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number }) =>
+export const updateUser = (id: number, changes: { status?: UserStatus; dailyLimit?: number; deepLimit?: number; imageLimit?: number }) =>
   request<void>(`/admin/users/${id}`, 'PATCH', changes);

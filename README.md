@@ -21,6 +21,7 @@ Early stage — working MVP:
 - "Risposta più approfondita": a per-message option that uses a stronger model, with its own small daily allowance;
 - conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
 - answers formatted in Markdown (tables, lists, code blocks) and shown in the chat;
+- images on explicit request ("genera un'immagine di…"), checked by a content filter, kept per account and deletable with the chat;
 - files on explicit request only ("fammi un PDF…", "crea un documento Excel…"): the model describes a document (text, lists, tables, bar/line/pie charts, quizzes with answer key) and the app renders it and exports it to PDF and Excel on the device;
 - "Allega": images and PDFs can be attached to a question. They are processed on the device (images downscaled, PDF text extracted, scanned pages turned into images); the extracted text is stored with the conversation, original files and images never are;
 - fixed answers pointing to real services for sensitive topics (never stored);

@@ -15,10 +15,15 @@ ADMIN_EMAILS=you@example.com
 # GROQ_MODEL=llama-3.3-70b-versatile
 # GEMINI_MODEL=gemini-flash-lite-latest
 
+# Optional image generation (paid Google AI key; the feature is off without it).
+# GEMINI_IMAGE_API_KEY=replace-with-your-paid-gemini-key
+# GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+
 # Optional: use the local mocks started with `npm run mock` instead of the
 # real services (no keys needed; any value works for the settings above).
 # OPENAI_BASE_URL=http://127.0.0.1:8788/v1
 # To try the fallback: OPENAI_BASE_URL=http://127.0.0.1:8788/down/v1 (always out of quota)
 # plus GROQ_API_KEY=any and GROQ_BASE_URL=http://127.0.0.1:8788/v1
+# Fake image model: GEMINI_IMAGE_API_KEY=any and GEMINI_IMAGE_BASE_URL=http://127.0.0.1:8788/v1beta
 # GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
 # GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token

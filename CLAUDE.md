@@ -45,7 +45,12 @@ Similar existing reference: Noema (pilot project that observes conversations and
 - **Answer format** (changed 2026-11-17): text answers use **Markdown**, rendered by `src/Markdown.tsx` (react-markdown + remark-gfm: tables, lists, code blocks, bold; raw HTML ignored, images never loaded, links open in a new tab with safe protocols only). Tables, comparisons, schemes and quizzes are shown in the chat as Markdown; text diagrams go in code blocks. User messages stay plain text. Mermaid-style graphical diagrams are not supported.
 - **Document creation** (added 2026-11-16, narrowed 2026-11-17): a downloadable file is produced **only when the user explicitly asks for one** ("crea un documento…", "fammi un PDF…", "prepara un file Excel…", or asks to change the document just created); never by inference (product decision). There is no button. A first, tiny call on the standard model classifies the message as `text` or `document` (`INTENT_SYSTEM_PROMPT`, reasoning switched off through the provider's `fastParams`); a table or a quiz without mention of a file is `text`; anything unclear, or a failed call, means text. For a document the model returns a JSON description (`shared/document.ts`: headings, paragraphs, lists, tables, bar/line/pie charts, quizzes) in JSON mode. The Worker validates it against size limits; the frontend renders the preview and builds the PDF (pdfmake) and Excel (write-excel-file) files on the device, loading those libraries on demand. The model never produces files or code. No review pass for documents. When numbers were not supplied by the user, the document carries a fixed disclaimer. To keep text answers fast, the text draft starts while the intent is detected and is dropped in the document case (not with the in-depth model, which is too expensive to run speculatively). Function calling was tried and rejected: OpenAI does not allow function tools together with reasoning for `gpt-6-luna` on Chat Completions. Future generated-content types (e.g. images) follow the same rule: explicit request only, no new button. TODO: diagrams (flowcharts, maps) inside documents.
 - **Attachments** (added 2026-11-16): the "Allega" button adds images and PDFs to a question (`shared/attachments.ts`, `src/attachments/`). Everything is prepared on the device: images are downscaled to 1568 px and re-encoded as JPEG (which also drops EXIF data); PDF text is extracted with pdf.js (first 30 pages, 60,000 characters); a scanned PDF has its first 5 pages rendered as images. Limits per message: 3 documents, 5 images. The Worker validates the payload and rejects the whole request if anything is malformed. Document text goes to the model inside `<attached_document>` blocks and is stored with the message, so follow-up questions work; images are sent as `image_url` parts and never stored (only their names). The client never receives stored document text back. Requires a vision-capable model: keep that in mind when adding fallback providers.
-- **TODO: image generation** with Nano Banana 2 Lite (paid). Needs a content filter, especially for minors.
+- **Image generation** (implemented 2026-11-17, not yet deployed): only on an **explicit request** ("genera un'immagine di…", "disegnami…", or a change to the image just created), like documents: no button; the intent classifier has a third value, `image`. Model: Nano Banana 2 Lite, `gemini-3.1-flash-lite-image` through `generateContent` (default id, overridable with `GEMINI_IMAGE_MODEL`; the request shape was taken from Google's docs and **not yet tried against the real API**). Needs a **paid** Google AI key in `GEMINI_IMAGE_API_KEY`, kept apart from `GEMINI_API_KEY` (the free-tier text fallback); without it the feature is off and the app says so.
+  - **Content filter** (worker/chat.ts `planImage`, `worker/images.ts`): (1) OpenAI moderation on the user's message; (2) a planner call (standard model, JSON) that refuses real identifiable people, sexual content, minors in any intimate or harmful situation, graphic violence, self-harm, hate content, weapons/drug instructions, trademarked characters and deceptive fake documents, and otherwise writes the English prompt; (3) moderation again on that prompt; (4) the image model's own safety filters (no picture returned = polite refusal, allowance refunded). Everything **fails closed**: if moderation or the planner is unavailable, no image is produced.
+  - **Limits**: separate daily allowance per user (`users.daily_image_limit`, default 3, editable by administrators), on top of the general message limit; ≈ $0.034 per image, so at most ≈ $0.10 per person per day.
+  - **Storage** (owner's choice, 2026-11-17): the files are kept in **R2** (bucket `aitool-images`, EU jurisdiction, binding `IMAGES`, key = image id) so they reopen from the history. Only their owner can read them (`GET /api/images/:id`, private cache, `nosniff`, sandbox CSP). Deleting a chat, all chats or the account deletes the files first. The model remembers an image only through the English description stored as the assistant message ("Image generated from this description: …"), which is what lets it build on it for "rendilo più scuro".
+  - Every image is labelled "generata dall'intelligenza artificiale" in the UI, with a download link.
+  - **Before deploying**: enable R2 in the Cloudflare dashboard, create the bucket (`npx wrangler r2 bucket create aitool-images --jurisdiction eu`), add the secret (`npx wrangler secret put GEMINI_IMAGE_API_KEY`), apply migration 0006, then deploy.
 - **No voice output (text-to-speech): it creates a relationship.** Product decision.
 
 ## Models (family use, November 2026 prices — verify)
@@ -78,7 +83,7 @@ Rules:
 
 - **Backend stack**: Cloudflare Workers (free tier), TypeScript, Hono. The React frontend is served by the same Worker as static assets.
 - **Login** (changed 2026-11-16, replaces personal access codes): Google sign-in only. Anyone can sign in, but a new account stays **pending until an administrator approves it**. Administrators are the emails in `ADMIN_EMAILS`; they manage users from the "Utenti" view. The daily limit is per person.
-- **Audience** (changed 2026-11-16): family plus adults the family works with. The tool must be safe, not limited.
+- **Audience** (changed 2026-11-17): **family use only**; there is no expansion plan for now. The tool must be safe, not limited. (On 2026-11-16 it was "family plus adults the family works with".)
 - **Message history** (changed 2026-11-16): conversations are stored on the server (D1, EU jurisdiction), tied to the account. The user can reopen them, delete one, delete all, or delete the whole account. The model never sees other conversations: no memory across chats. Fixed answers on sensitive topics are never stored.
 - **First provider**: OpenAI GPT-6 Luna from the start; free tiers are added later as fallback through the router.
 - **Anti-sycophancy check**: on every answer (second call that verifies and, if needed, rewrites).
@@ -87,16 +92,30 @@ Rules:
 
 - MVP for adults only (minors bring much heavier legal and safety obligations).
 
+## Open product questions (recorded 2026-11-17, not decided)
+
+The owner first needs to understand **how to turn this into a product**. Nothing below is decided; do not build for any of it until the owner chooses. Today the app is a private family tool.
+
+1. **Subscription or not?**
+   - No subscription: free for everyone, paid by the owner (today ≈ €10–15/month for ~6 people, i.e. roughly €2 per person; images and in-depth answers push it up). Does not scale: cost grows with every user, so it only works for a closed group or with hard per-user limits.
+   - Subscription: users pay a monthly fee that must cover the usage of a typical user plus payment fees and VAT. Needs: payment provider, accounts and plans, invoicing and tax, cancellation and refunds, support. The existing per-user daily limits (messages, in-depth answers, images) are the natural basis for plan tiers.
+   - Bring your own key (BYOK, already on the roadmap): the user pays the provider directly with their own key; the owner pays nothing per use. Good for technical users, not for the general public.
+2. **Offer an API?** Expose the tool to other developers or apps with API keys, per-key rate limits and billing, instead of (or besides) the web app. Questions: who would call it and why; the behaviour that makes the product different (no flattery, no retention, error correction) lives in the system prompt and the review pass, so an API would sell that layer on top of the models; metering, abuse protection and key management would be new work; an API makes the owner responsible for what third parties send.
+3. **Free version using only free models?** Possible in principle (Groq, Gemini and OpenRouter free tiers; the multi-provider router and the fallbacks already exist) but: the quotas belong to the owner's developer account, **not to each user**, so they are shared by everybody (the estimate in this file is ≈ 53 users/day); free tiers change or shrink without notice (e.g. Gemini cut by 50–80% in 2026) and are meant for prototypes; the free models are weaker; no images, no in-depth answers, and the free tiers may train on the data. A realistic shape could be: free = free models with low limits; paid = OpenAI models, images and in-depth answers.
+4. **Facts to collect before deciding**: real monthly cost per user from the app's own usage (not yet measured); who the target users would be; whether the owner wants this to be income, a service to others, or only to learn; how much time the owner can spend on support and billing.
+
+Things the owner explicitly parked: privacy notice and data retention (**dropped on 2026-11-17: family use only, no expansion plan**). They become relevant again only if the audience grows beyond the family; see the next section.
+
 ## Development
 
 - `npm run dev` — Vite dev server with the Worker running locally (frontend + `/api/*`).
 - `npm test` / `npm run build` (includes typecheck) — must pass before opening a PR.
 - `npm run db:migrate` — apply D1 migrations locally (`db:migrate:remote` for production).
 - `npm run mock` — local stand-ins for the model and for Google sign-in; enable them in `.dev.vars` (see `.dev.vars.example`).
-- Secrets (in `.dev.vars` locally, `wrangler secret put` in production): `OPENAI_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_EMAILS`.
+- Secrets (in `.dev.vars` locally, `wrangler secret put` in production): `OPENAI_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_EMAILS`; optional: `GROQ_API_KEY`, `GEMINI_API_KEY` (free-tier text fallbacks), `GEMINI_IMAGE_API_KEY` (paid, image generation).
 - Google OAuth redirect URI: `<origin>/api/auth/google/callback`.
 - Auth: server-side OAuth code flow, then an HttpOnly `session` cookie (30 days; only the token hash is stored). State-changing requests must carry a same-origin `Origin` header.
-- API: `/api/auth/google/start|callback`, `/api/auth/logout`, `/api/me` (GET, DELETE), `/api/conversations` (GET, DELETE), `/api/conversations/:id` (GET, DELETE), `/api/chat` (POST `{conversationId, message, attachments, deep}`; the reply carries `document` when the answer is a document), `/api/admin/users` (GET), `/api/admin/users/:id` (PATCH).
+- API: `/api/images/:id` (GET, owner only), `/api/auth/google/start|callback`, `/api/auth/logout`, `/api/me` (GET, DELETE), `/api/conversations` (GET, DELETE), `/api/conversations/:id` (GET, DELETE), `/api/chat` (POST `{conversationId, message, attachments, deep}`; the reply carries `document` when the answer is a document), `/api/admin/users` (GET), `/api/admin/users/:id` (PATCH).
 - Unverified assumption: the OpenAI request omits `temperature` (set per provider in `worker/llm/providers.ts`).
 - `npm run deploy` — build and deploy to Cloudflare (needs `wrangler login`).
 - Layout: `src/` React frontend, `worker/` Cloudflare Worker (API under `/api/*`), `shared/` code used by both.
@@ -171,12 +190,12 @@ Spreadsheet with editable parameters: https://claude.ai/artifact/1mj4nYV9vSnjFzm
 
 Free tiers change without notice (e.g. Gemini cut by 50–80% in 2026) and are often meant for prototypes: plan for graceful degradation.
 
-## Privacy and obligations (to be verified with an expert)
+## Privacy and obligations (parked 2026-11-17: family use only; revisit if the audience grows)
 
 - **GDPR**: data minimization; in Italy parental consent under 14; care with sensitive data.
 - **EU AI Act**: transparency obligation (the user must know they are talking to an AI); care with systems aimed at vulnerable people.
 - **Provider terms of use**: many restrict use by minors; also check whether the free tier uses data for training.
-- Conversations are stored on the server since 2026-11-16 (product decision). Consequences still to cover before opening to people outside the family: privacy notice, retention period, deletion on request (self-service deletion already exists).
+- Conversations are stored on the server since 2026-11-16 (product decision). Parked by the owner (family use only): privacy notice and retention period. Self-service deletion of chats and of the account already exists. They must be done before opening the app to anyone outside the family.
 
 ## Working conventions
 

@@ -10,10 +10,14 @@
 // - Use http://127.0.0.1:8788/down/v1 as a base URL to simulate a provider out of quota,
 //   e.g. OPENAI_BASE_URL=.../down/v1 with GROQ_BASE_URL=.../v1 to test the fallback.
 //
+// Image model (Gemini generateContent) — GEMINI_IMAGE_BASE_URL=http://127.0.0.1:8788/v1beta, GEMINI_IMAGE_API_KEY=any
+// - Returns a coloured PNG derived from the prompt; a prompt containing "BLOCKED" returns no picture.
+//
 // Google sign-in — GOOGLE_AUTH_URL=http://127.0.0.1:8788/oauth/authorize
 //                  GOOGLE_TOKEN_URL=http://127.0.0.1:8788/oauth/token
 // - The authorize page asks which fake account to sign in with.
 import { createHash } from 'node:crypto';
+import { crc32, deflateSync } from 'node:zlib';
 import { createServer } from 'node:http';
 
 const PORT = Number(process.env.PORT ?? 8788);
@@ -65,6 +69,52 @@ function chatCompletion(res, raw, url) {
   json(res, 200, { choices: [{ message: { role: 'assistant', content } }] });
 }
 
+/** A 384x384 PNG whose colours depend on the prompt: stands in for the image model. */
+function fakeImage(prompt) {
+  const size = 384;
+  const hash = createHash('sha256').update(prompt).digest();
+  const [r, g, b] = [hash[0], hash[1], hash[2]];
+  const rows = [];
+  for (let y = 0; y < size; y++) {
+    const row = Buffer.alloc(1 + size * 3);
+    for (let x = 0; x < size; x++) {
+      const t = (x + y) / (2 * size);
+      row[1 + x * 3] = Math.round(r * (1 - t) + 255 * t);
+      row[2 + x * 3] = Math.round(g * (1 - t) + 255 * t * 0.6);
+      row[3 + x * 3] = Math.round(b * (1 - t) + 255 * t * 0.9);
+    }
+    rows.push(row);
+  }
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function imageCompletion(res, raw) {
+  const prompt = JSON.parse(raw || '{}').contents?.[0]?.parts?.[0]?.text ?? '';
+  console.log(`image -> ${prompt}`);
+  // A prompt containing "BLOCKED" simulates the model's own safety filter: no picture comes back.
+  const parts = prompt.includes('BLOCKED')
+    ? [{ text: 'I cannot create this image.' }]
+    : [{ text: 'Here it is.' }, { inlineData: { mimeType: 'image/png', data: fakeImage(prompt).toString('base64') } }];
+  json(res, 200, { candidates: [{ content: { parts } }] });
+}
+
 function authorizePage(res, url) {
   const hidden = ['redirect_uri', 'state', 'client_id']
     .map((name) => `<input type="hidden" name="${name}" value="${escapeHtml(url.searchParams.get(name) ?? '')}">`)
@@ -112,6 +162,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
 
   try {
+    if (req.method === 'POST' && url.pathname.endsWith(':generateContent')) return imageCompletion(res, await readBody(req));
     if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) return chatCompletion(res, await readBody(req), url);
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') return authorizePage(res, url);
     if (req.method === 'GET' && url.pathname === '/oauth/continue') return authorizeContinue(res, url);
