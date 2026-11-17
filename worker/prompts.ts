@@ -39,9 +39,10 @@ If the draft complies, reply with exactly: OK
 Otherwise reply with the corrected answer only, in the same language as the draft, plain text, keeping all correct information and adding nothing else.`;
 
 /** First, tiny call: decides from the message alone what kind of answer is wanted. */
-export const INTENT_SYSTEM_PROMPT = `You route requests for an information tool. Reply with one word: document, image, search, context or text, optionally followed by " remember" (see the end).
+export const INTENT_SYSTEM_PROMPT = `You route requests for an information tool. Reply with one word: document, image, media, search, context or text, optionally followed by " remember" (see the end).
 - document: ONLY when the user explicitly asks for a file or document to be created or downloaded, for example "crea un documento", "fammi un PDF", "prepara un file Excel", "scrivimi una lettera da stampare", "genera una relazione in PDF", or, only when <previous_answer> is document, asks to change or extend the document created just before ("aggiungi un capitolo", "rendilo più breve"). Asking to modify, correct, rewrite, translate or summarise an attached document (PDF) so as to get a new version of it is also document.
 - image: ONLY when the user explicitly asks for a picture to be generated, for example "genera un'immagine di…", "disegnami…", "crea un'illustrazione…", "fammi un'immagine…", or asks to modify, retouch, restyle or colour an attached image or an image in the conversation ("modifica questa foto", "togli lo sfondo da questa immagine", "rendila in bianco e nero"), or, only when <previous_answer> is image, asks to change, redo or vary the image just generated: colours, light or time of day, style, adding or removing something, another version ("rendila più scura, ora è il tramonto", "aggiungi un cane", "fallo in cartoon", "togli le nuvole"). Questions about attached images (what they show, what is written in them), comments and thanks about the generated image are text, not image.
+- media: ONLY when the user explicitly asks to be SHOWN something that already exists: a map of a place ("mostrami la mappa di Roma", "fammi vedere dov'è Matera sulla cartina"), a video ("fammi vedere un video sul Colosseo", "trovami un video che spiega le maree"), or a real photo of a product, place, animal, artwork or object ("mostrami l'ultimo iPhone", "fammi vedere com'è fatto il Partenone", "una foto della Torre Eiffel"). Asking to generate, draw or create a picture is image, not media. A question about where something is or what it looks like that does not ask to show a map, video or photo is search or text.
 - search: a question whose answer states specific facts that can be checked on the web: dates, numbers, statistics, prices, people, places, events, news, laws, rules and deadlines, timetables, product specifications, anything recent or that may have changed. Not search: writing, translating, summarising or rewriting text, opinions, personal advice, calculations, programming, explanations of general concepts that need no specific facts, questions about attached files or about the conversation itself, greetings and thanks. When in doubt between search and text, reply search if the answer would state specific facts.
 - context: ONLY when the user explicitly asks the tool to remember, forget or change something about themselves for future conversations, or asks what the tool knows about them: "ricorda che…", "tieni a mente che…", "d'ora in poi rispondimi…", "dimentica che…", "cosa sai di me?", "aggiorna il mio contesto".
 - text: everything else. In particular a request for a table, a list, a scheme, a comparison, a quiz, a summary, a letter or a calculation WITHOUT mention of a file, document, PDF, Excel or download is text, because the answer is shown in the chat. Questions about documents or attached files are text too.
@@ -61,12 +62,14 @@ export function buildIntentInput(
   ].join('\n');
 }
 
-export type Intent = 'text' | 'document' | 'image' | 'search' | 'context';
+export type Intent = 'text' | 'document' | 'image' | 'media' | 'search' | 'context';
 
-/** Anything that is not clearly "document", "image", "search" or "context" is answered in text. */
+const INTENTS: Intent[] = ['document', 'image', 'media', 'search', 'context'];
+
+/** Anything that is not clearly one of the other intents is answered in text. */
 export function parseIntent(reply: string): Intent {
-  const word = /^\W*(document|image|search|context)\b/i.exec(reply.trim())?.[1].toLowerCase();
-  return word === 'document' || word === 'image' || word === 'search' || word === 'context' ? word : 'text';
+  const word = /^\W*(\w+)\b/.exec(reply.trim())?.[1].toLowerCase();
+  return INTENTS.find((intent) => intent === word) ?? 'text';
 }
 
 /** True when the classifier noticed a lasting fact about the user ("text remember"). */

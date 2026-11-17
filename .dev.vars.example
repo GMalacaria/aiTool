@@ -33,3 +33,8 @@ ADMIN_EMAILS=you@example.com
 # GEMINI_VERIFY_MODEL=gemini-flash-latest
 # App-wide cap on answers with web search per day (default 300; 0 turns sources off).
 # SOURCES_DAILY_LIMIT=300
+
+# "Mostrami…": maps (OpenStreetMap, no key) and videos (YouTube Data API key;
+# without it videos are off). Photo links use the web search above.
+# YOUTUBE_API_KEY=replace-with-your-youtube-data-api-key
+# NOMINATIM_USER_AGENT=Kern/1.0 (family AI tool)

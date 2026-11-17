@@ -38,6 +38,8 @@ import {
 import type { Profile } from './env';
 import type { UsageMeter } from './meter';
 import { answerWithSources, type SourcesConfig } from './sources';
+import { answerWithMedia, MEDIA_PLAN_SYSTEM_PROMPT, type MediaConfig } from './media';
+import type { MediaItem } from '../shared/media';
 
 /** Previous messages of the conversation sent to the model along with the new question. */
 export const MAX_HISTORY_MESSAGES = 8;
@@ -71,6 +73,8 @@ export interface ConversationMessage {
   sources?: string | null;
   /** The context change made with this answer, as stored JSON. */
   contextUpdate?: string | null;
+  /** A map or a video shown with the answer, as stored JSON. */
+  media?: string | null;
   /**
    * Images of this message loaded from storage for the model: the user's
    * attached images, or the image generated as this answer.
@@ -276,6 +280,8 @@ export interface Routers {
     paused: boolean;
     save: (content: string, source: ContextSource, note: string) => Promise<number>;
   };
+  /** Maps, videos and photo links ("mostrami…"); absent means the feature is off. */
+  media?: MediaConfig;
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
     enabled: boolean;
@@ -287,8 +293,22 @@ export interface Routers {
 }
 
 export type Reply =
-  | { text: string; sources?: AnswerSources | null; document?: undefined; image?: undefined; contextUpdate?: ContextUpdate }
-  | { document: DocumentSpec; text?: undefined; image?: undefined; sources?: undefined; contextUpdate?: ContextUpdate }
+  | {
+      text: string;
+      sources?: AnswerSources | null;
+      media?: MediaItem;
+      document?: undefined;
+      image?: undefined;
+      contextUpdate?: ContextUpdate;
+    }
+  | {
+      document: DocumentSpec;
+      text?: undefined;
+      image?: undefined;
+      sources?: undefined;
+      media?: undefined;
+      contextUpdate?: ContextUpdate;
+    }
   /**
    * An allowed image request: the English description for a new picture, or the
    * edit instruction together with the image to edit.
@@ -299,11 +319,13 @@ export type Reply =
       document?: undefined;
       sources?: undefined;
       contextUpdate?: ContextUpdate;
+      media?: undefined;
     };
 
 export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
 export const IMAGE_NO_SOURCE_TEXT =
   'Non trovo l’immagine da modificare in questa conversazione. Allegala di nuovo e ripeti la richiesta.';
+export const MEDIA_OFF_TEXT = 'La ricerca di mappe, video e foto non è attiva.';
 export const IMAGES_UNAVAILABLE_TEXT = 'La creazione di immagini non è disponibile in questo momento. Riprova più tardi.';
 
 function previousAnswer(history: ConversationMessage[]): 'text' | 'document' | 'image' {
@@ -445,6 +467,7 @@ async function answerFor(
     };
   }
   if (detected === 'image') return planImage(routers, history, question, attachments);
+  if (detected === 'media') return showMedia(routers, history, question, attachments);
 
   if (detected === 'search' && routers.sources) {
     try {
@@ -513,6 +536,22 @@ async function planImage(
     console.warn('image request could not be checked', error);
     return { text: IMAGES_UNAVAILABLE_TEXT };
   }
+}
+
+/** A map, a video or a link to photos, found by a real search: never a link written by the model. */
+async function showMedia(
+  routers: Routers,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+): Promise<Reply> {
+  if (!routers.media) return { text: MEDIA_OFF_TEXT };
+  // The planner sees the conversation as text ("e ora un video") and no images.
+  const messages = buildMessages(MEDIA_PLAN_SYSTEM_PROMPT, history, question, { documents: attachments.documents, images: [] }, 'text', false);
+  return answerWithMedia(routers.media, routers.review, messages, {
+    meter: routers.meter,
+    containsAttachments: usesAttachments(history, attachments),
+  });
 }
 
 /** A factual answer written with web search, checked sentence by sentence against its sources. */

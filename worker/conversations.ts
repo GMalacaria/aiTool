@@ -1,4 +1,5 @@
 import { parseStoredAttachments, type StoredAttachments } from '../shared/attachments';
+import type { MediaItem } from '../shared/media';
 import { stripMarkers, type AnswerSources } from '../shared/sources';
 import type { ContextUpdate } from '../shared/context';
 import type { ConversationMessage, MessageKind } from './chat';
@@ -40,11 +41,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate, media FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT id, role, content, kind, attachments, imageId, freeModel, sources, contextUpdate FROM (
-               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT id, role, content, kind, attachments, imageId, freeModel, sources, contextUpdate, media FROM (
+               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources, context_update AS contextUpdate, media FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -72,10 +73,12 @@ export async function saveExchange(
   sources: AnswerSources | null = null,
   /** The context change made with the answer. */
   contextUpdate: ContextUpdate | null = null,
+  /** A map or a video shown with the answer. */
+  media: MediaItem | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
-    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model, sources, context_update) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model, sources, context_update, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
 
   await db.batch([
@@ -100,7 +103,7 @@ export async function saveExchange(
           )
           .bind(attached.id ?? '', user.id, id, attached.mimeType ?? 'image/jpeg', attached.name),
       ),
-    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0, null, null),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0, null, null, null),
     insertMessage.bind(
       id,
       'assistant',
@@ -111,6 +114,7 @@ export async function saveExchange(
       freeModel ? 1 : 0,
       sources ? JSON.stringify(sources) : null,
       contextUpdate ? JSON.stringify(contextUpdate) : null,
+      media ? JSON.stringify(media) : null,
     ),
   ]);
 

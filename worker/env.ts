@@ -28,6 +28,16 @@ export interface Env {
   GEMINI_VERIFY_MODEL?: string;
   /** App-wide cap on answers with web search per day (all users together). Default 300; 0 turns sources off. */
   SOURCES_DAILY_LIMIT?: string;
+  /**
+   * Videos for "mostrami un video…": a YouTube Data API key (free quota). Without
+   * it the tool says that videos are off; maps and photo links still work.
+   */
+  YOUTUBE_API_KEY?: string;
+  /** Optional overrides for local mocks: geocoding (OpenStreetMap Nominatim) and YouTube endpoints. */
+  NOMINATIM_BASE_URL?: string;
+  YOUTUBE_BASE_URL?: string;
+  /** User-Agent sent to Nominatim, whose usage policy asks for an identifying one. */
+  NOMINATIM_USER_AGENT?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   /** Optional overrides, used to point Google sign-in at a local mock. */

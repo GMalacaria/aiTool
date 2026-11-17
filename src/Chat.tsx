@@ -6,6 +6,7 @@ import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
 import { ContextNote } from './ContextNote';
+import { MediaView } from './MediaView';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
 import { CloseIcon, PlusIcon, ReasonIcon, SendIcon, VerifiedIcon } from './ui/icons';
@@ -409,6 +410,7 @@ export function Chat({
                     onUndo={message.id !== undefined ? () => onUndoContext(message.id as number) : undefined}
                   />
                 )}
+                {message.role === 'assistant' && message.media && <MediaView media={message.media} />}
                 {message.role === 'assistant' && message.freeModel && (
                   <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
                 )}
