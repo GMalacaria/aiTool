@@ -1537,6 +1537,26 @@ select {
   color: var(--on-accent);
 }
 
+/* Narrow windows: the text gets a full line of its own (room for the placeholder);
+   attach, "Fonti", answer type and send sit on the line below. The signed-out
+   composer has no options and keeps one line. */
+@media (max-width: 48rem) {
+  .composer-row:has(.composer-mode-wrap) {
+    flex-wrap: wrap;
+    row-gap: 0.15rem;
+  }
+
+  .composer-row:has(.composer-mode-wrap) .composer-input {
+    order: -1;
+    flex-basis: 100%;
+    padding-inline: 0.6rem;
+  }
+
+  .composer-row:has(.composer-mode-wrap) .send-button {
+    margin-left: auto;
+  }
+}
+
 /* Touch screens and narrow windows get the send button; on a keyboard Enter sends. */
 @media (pointer: coarse), (max-width: 48rem) {
   .send-button {
