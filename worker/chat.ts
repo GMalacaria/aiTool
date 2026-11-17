@@ -7,6 +7,7 @@ import {
   type StoredAttachments,
 } from '../shared/attachments';
 import { parseDocument, type DocumentSpec } from '../shared/document';
+import { stripMarkers, type AnswerSources } from '../shared/sources';
 import type { ChatMessage, ContentPart, ProviderRouter } from './llm/router';
 import {
   applyReview,
@@ -21,6 +22,8 @@ import {
   parseImagePlan,
   parseIntent,
   REVIEW_SYSTEM_PROMPT,
+  SEARCH_INSTRUCTION,
+  type Intent,
   STUDENT_DOCUMENT_INSTRUCTION,
   STUDENT_INSTRUCTION,
   STUDENT_REVIEW_INSTRUCTION,
@@ -30,6 +33,7 @@ import {
 } from './prompts';
 import type { Profile } from './env';
 import type { UsageMeter } from './meter';
+import { answerWithSources, type SourcesConfig } from './sources';
 
 /** Previous messages of the conversation sent to the model along with the new question. */
 export const MAX_HISTORY_MESSAGES = 8;
@@ -57,6 +61,8 @@ export interface ConversationMessage {
   imageId?: string | null;
   /** 1 when the answer came from a free-tier model. */
   freeModel?: number;
+  /** Verified sources of the answer, as stored JSON. */
+  sources?: string | null;
   /**
    * Images of this message loaded from storage for the model: the user's
    * attached images, or the image generated as this answer.
@@ -140,7 +146,7 @@ function historyMessage(message: ConversationMessage, target: MessageKind, withI
     const content =
       message.kind === 'document' && target !== 'document'
         ? `[A document was created and shown to the user. Its content, as JSON:]\n${message.content}`
-        : message.content;
+        : stripMarkers(message.content);
     return { role: 'assistant', content };
   }
 
@@ -244,6 +250,8 @@ export interface Routers {
   meter?: UsageMeter;
   /** 'student' turns the tool into a tutor that does not hand out solutions. */
   profile?: Profile;
+  /** Web search with verified sources; absent means factual questions are answered without them. */
+  sources?: SourcesConfig;
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
     enabled: boolean;
@@ -255,13 +263,13 @@ export interface Routers {
 }
 
 export type Reply =
-  | { text: string; document?: undefined; image?: undefined }
-  | { document: DocumentSpec; text?: undefined; image?: undefined }
+  | { text: string; sources?: AnswerSources | null; document?: undefined; image?: undefined }
+  | { document: DocumentSpec; text?: undefined; image?: undefined; sources?: undefined }
   /**
    * An allowed image request: the English description for a new picture, or the
    * edit instruction together with the image to edit.
    */
-  | { image: { prompt: string; source?: SourceImage }; text?: undefined; document?: undefined };
+  | { image: { prompt: string; source?: SourceImage }; text?: undefined; document?: undefined; sources?: undefined };
 
 export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
 export const IMAGE_NO_SOURCE_TEXT =
@@ -284,7 +292,7 @@ export async function detectIntent(
   question: string,
   attachments: Attachments,
   meter?: UsageMeter,
-): Promise<'text' | 'document' | 'image'> {
+): Promise<Intent> {
   try {
     const reply = await router.complete(
       [
@@ -331,6 +339,15 @@ export async function respond(
     };
   }
   if (detected === 'image') return planImage(routers, history, question, attachments);
+
+  if (detected === 'search' && routers.sources) {
+    try {
+      return await searchText(routers, routers.sources, history, question, attachments);
+    } catch (error) {
+      // Without search the question is still answered, only without sources.
+      console.warn('web search failed, answering without sources', error);
+    }
+  }
 
   const draft = await (speculativeDraft ?? draftText(routers, history, question, attachments));
   return { text: await reviewText(routers, question, attachments, draft, history) };
@@ -388,6 +405,31 @@ async function planImage(
     console.warn('image request could not be checked', error);
     return { text: IMAGES_UNAVAILABLE_TEXT };
   }
+}
+
+/** A factual answer written with web search, checked sentence by sentence against its sources. */
+async function searchText(
+  routers: Routers,
+  config: SourcesConfig,
+  history: ConversationMessage[],
+  question: string,
+  attachments: Attachments,
+): Promise<Reply> {
+  const systemPrompt = [
+    SYSTEM_PROMPT,
+    SEARCH_INSTRUCTION,
+    ...(routers.deep ? [DEEP_INSTRUCTION] : []),
+    ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
+  ].join('\n');
+  const result = await answerWithSources(config, buildMessages(systemPrompt, history, question, attachments, 'text'), {
+    deep: routers.deep,
+    // Reasoning and the search itself share the output budget of the Responses API.
+    maxOutputTokens: routers.deep ? MAX_DEEP_OUTPUT_TOKENS * 2 : MAX_OUTPUT_TOKENS * 3,
+    meter: routers.meter,
+    documents: attachments.documents,
+    review: (draft) => reviewText(routers, question, attachments, draft, history),
+  });
+  return { text: result.text, sources: result.sources };
 }
 
 function draftText(

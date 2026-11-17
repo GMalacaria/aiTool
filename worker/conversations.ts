@@ -1,4 +1,5 @@
 import { parseStoredAttachments, type StoredAttachments } from '../shared/attachments';
+import { stripMarkers, type AnswerSources } from '../shared/sources';
 import type { ConversationMessage, MessageKind } from './chat';
 import type { User } from './env';
 
@@ -38,11 +39,11 @@ export async function findConversation(db: D1Database, user: User, id: string): 
 export async function listMessages(db: D1Database, conversationId: string, limit?: number): Promise<ConversationMessage[]> {
   const statement =
     limit === undefined
-      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId, free_model AS freeModel FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
+      ? db.prepare('SELECT role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id').bind(conversationId)
       : db
           .prepare(
-            `SELECT role, content, kind, attachments, imageId, freeModel FROM (
-               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+            `SELECT role, content, kind, attachments, imageId, freeModel, sources FROM (
+               SELECT id, role, content, kind, attachments, image_id AS imageId, free_model AS freeModel, sources FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
              ) ORDER BY id`,
           )
           .bind(conversationId, limit);
@@ -66,10 +67,12 @@ export async function saveExchange(
   freeModel = false,
   /** Title for a new conversation; defaults to the start of the question. */
   title: string | null = null,
+  /** Verified sources of a text answer. */
+  sources: AnswerSources | null = null,
 ): Promise<ConversationSummary> {
   const id = conversationId ?? crypto.randomUUID();
   const insertMessage = db.prepare(
-    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (conversation_id, role, content, kind, attachments, image_id, free_model, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
 
   await db.batch([
@@ -94,8 +97,8 @@ export async function saveExchange(
           )
           .bind(attached.id ?? '', user.id, id, attached.mimeType ?? 'image/jpeg', attached.name),
       ),
-    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0),
-    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null, freeModel ? 1 : 0),
+    insertMessage.bind(id, 'user', question, 'text', attachments ? JSON.stringify(attachments) : null, null, 0, null),
+    insertMessage.bind(id, 'assistant', answer, answerKind, null, image?.id ?? null, freeModel ? 1 : 0, sources ? JSON.stringify(sources) : null),
   ]);
 
   const conversation = await findConversation(db, user, id);
@@ -166,7 +169,7 @@ function likePattern(query: string): string {
 
 export function snippetAround(text: string, query: string): string {
   // Markdown markers would show up as raw symbols in the excerpt.
-  const flat = text.replace(/[*_`#>|]+/g, '').replace(/\s+/g, ' ').trim();
+  const flat = stripMarkers(text).replace(/[*_`#>|]+/g, '').replace(/\s+/g, ' ').trim();
   const at = flat.toLowerCase().indexOf(query.toLowerCase());
   if (at === -1) return flat.slice(0, SNIPPET_CHARS);
   const start = Math.max(0, at - 40);

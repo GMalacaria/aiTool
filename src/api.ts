@@ -1,5 +1,6 @@
 import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
+import type { AnswerSources } from '../shared/sources';
 
 export type UserStatus = 'pending' | 'approved' | 'blocked';
 export type Profile = 'professional' | 'student';
@@ -38,6 +39,8 @@ export interface ConversationMessage {
   freeModel?: boolean;
   /** Names of the files attached to a question. */
   attachments?: AttachmentNames;
+  /** Verified sources: the legend for the markers in the text. */
+  sources?: AnswerSources;
 }
 
 export interface ConversationSummary {
@@ -59,6 +62,8 @@ export interface ChatResult {
   image?: { id: string };
   /** Present when the answer is a document. */
   document?: DocumentSpec;
+  /** Present when the answer was written with web search. */
+  sources?: AnswerSources;
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;
@@ -82,6 +87,9 @@ export interface ManagedUser {
   monthCostMicroUsd: number;
   monthRequests: number;
   monthFreeTokens: number;
+  /** Web searches this month and what searching and checking sources cost (paid by the owner). */
+  monthSearches: number;
+  monthSourcesCostMicroUsd: number;
 }
 
 export interface UsageDay {
@@ -96,6 +104,8 @@ export interface UsageDay {
   paidTokens: number;
   freeTokens: number;
   costMicroUsd: number;
+  searches: number;
+  sourcesCostMicroUsd: number;
 }
 
 export type UserChanges = Partial<Pick<ManagedUser, 'status' | 'profile' | 'dailyLimit' | 'deepLimit' | 'imageLimit' | 'tokenLimit'>>;

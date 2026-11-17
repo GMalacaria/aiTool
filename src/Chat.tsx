@@ -311,7 +311,7 @@ export function Chat({
                 ) : message.image ? (
                   <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
                 ) : message.role === 'assistant' ? (
-                  <Markdown text={message.content} />
+                  <Markdown text={message.content} sources={message.sources} />
                 ) : (
                   <p>{message.content}</p>
                 )}

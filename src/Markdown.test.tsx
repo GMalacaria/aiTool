@@ -48,3 +48,35 @@ describe('Markdown', () => {
     expect(html).toContain('<span class="md-image-alt">Grafico</span>');
   });
 });
+
+describe('source markers', () => {
+  const sources = {
+    items: [
+      { kind: 'web' as const, url: 'https://www.atac.roma.it/bit', title: 'BIT' },
+      { kind: 'web' as const, url: 'https://www.quirinale.it/', title: 'Quirinale' },
+    ],
+    verified: true,
+  };
+
+  it('turns markers into citation links and toggletips, and lists the sources', () => {
+    const html = renderToStaticMarkup(
+      <Markdown
+        text={'Costa 1,50 €.[1](#source-1) È Mattarella.[?](#unreadable-2) Vale ovunque.[?](#unverified)'}
+        sources={sources}
+      />,
+    );
+    expect(html).toContain('<a class="citation" href="https://www.atac.roma.it/bit" target="_blank" rel="noopener noreferrer"');
+    expect(html).toContain('[1]</a>');
+    expect(html).toContain('la fonte indicata non è leggibile');
+    expect(html).toContain('nessuna fonte la conferma');
+    expect(html).toContain('popover="hint"');
+    expect(html).toContain('<section class="source-legend" aria-label="Fonti"><h3>Fonti</h3><ol>');
+    expect(html).toContain('non leggibile, non verificata');
+    expect(html).not.toContain('#source-1');
+  });
+
+  it('says when the sources could not be checked', () => {
+    const html = renderToStaticMarkup(<Markdown text="Testo." sources={{ ...sources, verified: false }} />);
+    expect(html).toContain('Fonti consultate (verifica non disponibile)');
+  });
+});

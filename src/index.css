@@ -14,6 +14,8 @@
   --accent: light-dark(#1a70ad, #7cc4f5);
   --on-accent: light-dark(#ffffff, #082032);
   --error: light-dark(#a12626, #f09a9a);
+  /* Unverified statements: noticeable, not alarming. */
+  --warning: light-dark(#8a5300, #f2c26b);
   --hover: light-dark(rgb(26 112 173 / 0.08), rgb(124 196 245 / 0.1));
   --selected: light-dark(rgb(26 112 173 / 0.15), rgb(124 196 245 / 0.17));
 
@@ -797,6 +799,86 @@ textarea {
 }
 
 /* Markdown in answers */
+
+/* Source markers: [n] links to the source, [?] opens a toggletip. */
+.citation {
+  margin-left: 0.1em;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75em;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: super;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.markdown a.citation {
+  color: var(--accent);
+}
+
+.markdown a.citation:hover,
+.markdown a.citation:focus-visible {
+  text-decoration: underline;
+}
+
+.citation-unchecked {
+  color: var(--warning);
+  cursor: help;
+}
+
+.citation-unchecked:hover,
+.citation-unchecked:focus-visible {
+  text-decoration: underline dotted;
+}
+
+.citation-tip {
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  color: var(--text);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* Above the marker, flipping below when there is no room; centred on screen otherwise. */
+@supports (position-area: block-start) {
+  .citation-tip {
+    inset: auto;
+    margin: 0 0 0.3rem;
+    position-area: block-start;
+    position-try-fallbacks: flip-block, flip-inline;
+  }
+}
+
+.source-legend {
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.markdown .source-legend h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.markdown .source-legend ol {
+  margin: 0;
+  padding-left: 1.6rem;
+  list-style: decimal;
+}
+
+.markdown .source-legend ol > li::marker {
+  content: '[' counter(list-item) ']  ';
+  color: var(--muted);
+}
 
 .markdown {
   min-width: 0;

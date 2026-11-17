@@ -54,6 +54,8 @@ function UsageTable({ days }: { days: UsageDay[] }) {
             <th scope="col">Immagini</th>
             <th scope="col">Token a pagamento</th>
             <th scope="col">Token gratuiti</th>
+            <th scope="col">Ricerche fonti</th>
+            <th scope="col">Costo fonti</th>
             <th scope="col">Costo stimato</th>
           </tr>
         </thead>
@@ -70,6 +72,8 @@ function UsageTable({ days }: { days: UsageDay[] }) {
               <td>{day.images}</td>
               <td>{integer.format(day.paidTokens)}</td>
               <td>{integer.format(day.freeTokens)}</td>
+              <td>{day.searches ?? 0}</td>
+              <td>{money(day.sourcesCostMicroUsd ?? 0)}</td>
               <td>{money(day.costMicroUsd)}</td>
             </tr>
           ))}
@@ -185,6 +189,13 @@ function UserCard({ user, onChange }: { user: ManagedUser; onChange: (changes: U
                 {user.monthFreeTokens > 0 && `, ${integer.format(user.monthFreeTokens)} token gratuiti`}
               </dd>
             </div>
+            <div>
+              <dt>Fonti questo mese</dt>
+              <dd>
+                {user.monthSearches} ricerche, {money(user.monthSourcesCostMicroUsd)} (a carico tuo, inclusi nel costo
+                del mese)
+              </dd>
+            </div>
           </dl>
 
           <button type="button" onClick={() => void toggleUsage()} aria-expanded={open}>
@@ -225,6 +236,7 @@ export function Users({ onFailure }: UsersProps) {
   }
 
   const monthTotal = users?.reduce((total, user) => total + user.monthCostMicroUsd, 0) ?? 0;
+  const monthSources = users?.reduce((total, user) => total + user.monthSourcesCostMicroUsd, 0) ?? 0;
 
   return (
     <main className="users">
@@ -232,8 +244,8 @@ export function Users({ onFailure }: UsersProps) {
 
       {users && (
         <p className="muted">
-          Costo stimato del mese per tutti gli utenti: <strong>{money(monthTotal)}</strong> (modelli a pagamento e
-          immagini; prezzi indicativi).
+          Costo stimato del mese per tutti gli utenti: <strong>{money(monthTotal)}</strong>, di cui fonti verificate{' '}
+          <strong>{money(monthSources)}</strong> (modelli a pagamento, immagini, ricerche e verifiche; prezzi indicativi).
         </p>
       )}
       {users === null && (

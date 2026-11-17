@@ -5,13 +5,13 @@ import { ProviderRouter, type Provider } from './router';
 /** 'standard' answers every message; 'deep' is the "more in-depth answer" model. */
 export type Tier = 'standard' | 'deep';
 
-const OPENAI_MODELS: Record<Tier, string> = {
+export const OPENAI_MODELS: Record<Tier, string> = {
   standard: 'gpt-6-luna',
   deep: 'gpt-6-sol',
 };
 
 /** USD per million tokens, November 2026 — verify on the provider's pricing page. */
-const OPENAI_PRICES: Record<Tier, Price> = {
+export const OPENAI_PRICES: Record<Tier, Price> = {
   standard: { inputPerMillion: 0.1, outputPerMillion: 0.5 },
   deep: { inputPerMillion: 2, outputPerMillion: 10 },
 };
