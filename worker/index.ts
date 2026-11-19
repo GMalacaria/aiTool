@@ -56,6 +56,7 @@ import {
   searchConversations,
   saveExchange,
 } from './conversations';
+import { MAX_AUDIO_BYTES, transcribe } from './transcribe';
 import { PROFILES, type AppEnv, type Env, type UserStatus } from './env';
 import { getRouter, hasFreeProviders, OPENAI_MODELS, OPENAI_PRICES, type Tier } from './llm/providers';
 import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, verifyAnswer, type SourcesConfig } from './sources';
@@ -626,6 +627,32 @@ app.post('/messages/:id/verify', requireUser, requireApproved, async (c) => {
     console.error('source check failed', error);
     await recordUsage(c.env.DB, user, day, 'error', 'paid', meter).catch(() => undefined);
     return c.json({ error: 'sources_unavailable' }, 503);
+  }
+});
+
+/**
+ * Dictation: turns a recording into text for the request field. Professional
+ * profile only (students must write their own text). The text is returned,
+ * never sent as a message, and the audio is not stored.
+ */
+app.post('/transcribe', requireUser, requireApproved, async (c) => {
+  const user = c.get('user');
+  if (user.profile !== 'professional') return c.json({ error: 'forbidden' }, 403);
+
+  const declared = Number(c.req.header('Content-Length') ?? 0);
+  if (declared > MAX_AUDIO_BYTES + 64 * 1024) return c.json({ error: 'invalid_request' }, 413);
+
+  const form = await c.req.formData().catch(() => null);
+  const audio = form?.get('audio');
+  if (!(audio instanceof File) || audio.size === 0 || audio.size > MAX_AUDIO_BYTES) {
+    return c.json({ error: 'invalid_request' }, 400);
+  }
+
+  try {
+    return c.json({ text: await transcribe(c.env, audio) });
+  } catch (error) {
+    console.error('transcription failed', error);
+    return c.json({ error: 'service_unavailable' }, 503);
   }
 });
 

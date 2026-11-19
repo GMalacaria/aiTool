@@ -1679,6 +1679,24 @@ select {
   cursor: not-allowed;
 }
 
+.composer-mic[data-recording] {
+  background: var(--accent);
+  color: var(--on-accent);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-mic[data-recording] {
+    animation: none;
+  }
+}
+
 .send-button {
   display: none;
   flex-shrink: 0;
