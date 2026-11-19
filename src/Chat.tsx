@@ -396,20 +396,6 @@ export function Chat({
             autoFocus
           />
 
-          {dictation && (
-            <button
-              type="button"
-              className="icon-button composer-mic"
-              data-recording={recording || undefined}
-              aria-label={recording ? 'Termina il dettato' : 'Detta il testo'}
-              title={recording ? 'Termina il dettato' : 'Detta il testo'}
-              onClick={() => void toggleDictation()}
-              disabled={pending || reading || transcribing || limitReached}
-            >
-              {recording ? <StopIcon /> : <MicIcon />}
-            </button>
-          )}
-
           <button
             type="button"
             className="composer-toggle"
@@ -444,6 +430,20 @@ export function Chat({
               </option>
             </select>
           </span>
+
+          {dictation && (
+            <button
+              type="button"
+              className="icon-button composer-mic"
+              data-recording={recording || undefined}
+              aria-label={recording ? 'Termina il dettato' : 'Detta il testo'}
+              title={recording ? 'Termina il dettato' : 'Detta il testo'}
+              onClick={() => void toggleDictation()}
+              disabled={pending || reading || transcribing || limitReached}
+            >
+              {recording ? <StopIcon /> : <MicIcon />}
+            </button>
+          )}
 
           {/* On a keyboard Enter sends; the button is shown on touch screens and narrow windows. */}
           <button type="submit" className="send-button" aria-label="Invia" title="Invia" disabled={cannotSend}>

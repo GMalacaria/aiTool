@@ -1729,6 +1729,15 @@ select {
     margin-left: auto;
   }
 
+  /* The microphone sits at the right edge, next to send. */
+  .composer-row:has(.composer-mode-wrap) .composer-mic {
+    margin-left: auto;
+  }
+
+  .composer-row:has(.composer-mic) .send-button {
+    margin-left: 0;
+  }
+
   /* Icons only: the labels stay for screen readers. */
   .composer-toggle {
     position: relative;
