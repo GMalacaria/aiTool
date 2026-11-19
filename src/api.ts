@@ -1,5 +1,6 @@
 import type { AttachmentNames, Attachments } from '../shared/attachments';
 import type { DocumentSpec } from '../shared/document';
+import type { Illustration } from '../shared/illustrations';
 import type { MediaItem } from '../shared/media';
 import type { AnswerSources } from '../shared/sources';
 import type { ContextSource, ContextUpdate } from '../shared/context';
@@ -49,6 +50,8 @@ export interface ConversationMessage {
   contextUpdate?: ContextUpdate;
   /** A map or a video shown with the answer. */
   media?: MediaItem;
+  /** Pictures from Wikimedia Commons that help explain the answer. */
+  illustrations?: Illustration[];
 }
 
 export interface ConversationSummary {
@@ -78,6 +81,8 @@ export interface ChatResult {
   contextUpdate?: ContextUpdate;
   /** Present when the answer shows a map or a video. */
   media?: MediaItem;
+  /** Pictures from Wikimedia Commons that help explain the answer. */
+  illustrations?: Illustration[];
   remaining: number;
   /** Null when the exchange was not stored (fixed answers on sensitive topics). */
   conversation: ConversationSummary | null;

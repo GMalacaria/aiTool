@@ -19,6 +19,7 @@ import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
 import { MAX_QUESTIONS_PER_CONVERSATION } from '../shared/conversation';
 import { normalizeContext, parseContextUpdate } from '../shared/context';
+import { parseIllustrations } from '../shared/illustrations';
 import { parseMedia } from '../shared/media';
 import { parseSources } from '../shared/sources';
 import {
@@ -165,12 +166,13 @@ function toClientMessage(message: ConversationMessage) {
   const sources = message.sources ? (parseSources(message.sources) ?? undefined) : undefined;
   const contextUpdate = message.contextUpdate ? (parseContextUpdate(message.contextUpdate) ?? undefined) : undefined;
   const media = message.media ? (parseMedia(message.media) ?? undefined) : undefined;
+  const illustrations = message.illustrations ? (parseIllustrations(message.illustrations) ?? undefined) : undefined;
   const id = message.id;
   if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId }, contextUpdate };
 
   return document
     ? { id, role: message.role, content: document.title, document, freeModel, contextUpdate }
-    : { id, role: message.role, content: message.content, attachments, freeModel, sources, contextUpdate, media };
+    : { id, role: message.role, content: message.content, attachments, freeModel, sources, contextUpdate, media, illustrations };
 }
 
 app.use(requireSameOrigin);
@@ -439,6 +441,11 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
               }
             : undefined,
           profile: user.profile,
+          illustrations: {
+            isFlagged: (text) => isFlagged(c.env, text),
+            commonsURL: c.env.COMMONS_API_URL,
+            userAgent: c.env.WIKIMEDIA_USER_AGENT,
+          },
           media: {
             isFlagged: (text) => isFlagged(c.env, text),
             youtubeKey: c.env.YOUTUBE_API_KEY,
@@ -535,7 +542,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       const free = meter.answeredByFreeModel;
       conversation = result.document
         ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise, null, result.contextUpdate ?? null)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null, result.contextUpdate ?? null, result.media ?? null);
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null, result.contextUpdate ?? null, result.media ?? null, result.illustrations ?? null);
     }
 
     uploadedImages = [];
@@ -550,6 +557,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       sources: result.text !== undefined ? (result.sources ?? undefined) : undefined,
       contextUpdate: result.contextUpdate,
       media: result.media,
+      illustrations: result.illustrations,
       deep,
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),

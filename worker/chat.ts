@@ -23,6 +23,7 @@ import {
   buildImagePlanInput,
   parseImagePlan,
   parseIntent,
+  parseVisual,
   REVIEW_SYSTEM_PROMPT,
   SEARCH_INSTRUCTION,
   type Intent,
@@ -40,6 +41,8 @@ import type { UsageMeter } from './meter';
 import { answerWithSources, type SourcesConfig } from './sources';
 import { answerWithMedia, MEDIA_PLAN_SYSTEM_PROMPT, type MediaConfig } from './media';
 import type { MediaItem } from '../shared/media';
+import type { Illustration } from '../shared/illustrations';
+import { findIllustrations, type IllustrationsConfig } from './illustrations';
 
 /** Previous messages of the conversation sent to the model along with the new question. */
 export const MAX_HISTORY_MESSAGES = 8;
@@ -75,6 +78,8 @@ export interface ConversationMessage {
   contextUpdate?: string | null;
   /** A map or a video shown with the answer, as stored JSON. */
   media?: string | null;
+  /** Pictures shown with the answer, as stored JSON. */
+  illustrations?: string | null;
   /**
    * Images of this message loaded from storage for the model: the user's
    * attached images, or the image generated as this answer.
@@ -282,6 +287,8 @@ export interface Routers {
   };
   /** Maps, videos and photo links ("mostrami…"); absent means the feature is off. */
   media?: MediaConfig;
+  /** Pictures from Wikimedia Commons for explanations; absent means the feature is off. */
+  illustrations?: IllustrationsConfig;
   /** Image generation; absent or disabled means the feature is off. */
   images?: {
     enabled: boolean;
@@ -297,6 +304,8 @@ export type Reply =
       text: string;
       sources?: AnswerSources | null;
       media?: MediaItem;
+      /** Pictures from Wikimedia Commons that help explain the answer. */
+      illustrations?: Illustration[];
       document?: undefined;
       image?: undefined;
       contextUpdate?: ContextUpdate;
@@ -307,6 +316,7 @@ export type Reply =
       image?: undefined;
       sources?: undefined;
       media?: undefined;
+      illustrations?: undefined;
       contextUpdate?: ContextUpdate;
     }
   /**
@@ -320,6 +330,7 @@ export type Reply =
       sources?: undefined;
       contextUpdate?: ContextUpdate;
       media?: undefined;
+      illustrations?: undefined;
     };
 
 export const IMAGES_OFF_TEXT = 'La creazione di immagini non è attiva.';
@@ -355,7 +366,7 @@ async function classify(
   question: string,
   attachments: Attachments,
   meter?: UsageMeter,
-): Promise<{ intent: Intent; remember: boolean }> {
+): Promise<{ intent: Intent; remember: boolean; visual: boolean }> {
   try {
     const reply = await router.complete(
       [
@@ -367,10 +378,10 @@ async function classify(
       ],
       { maxOutputTokens: MAX_INTENT_OUTPUT_TOKENS, fast: true, timeoutMs: INTENT_TIMEOUT_MS, meter, purpose: 'intent' },
     );
-    return { intent: parseIntent(reply), remember: parseRemember(reply) };
+    return { intent: parseIntent(reply), remember: parseRemember(reply), visual: parseVisual(reply) };
   } catch (error) {
     console.warn('intent detection failed', error);
-    return { intent: 'text', remember: false };
+    return { intent: 'text', remember: false, visual: false };
   }
 }
 
@@ -435,14 +446,19 @@ export async function respond(
   // A failure is reported only if this draft ends up being used.
   speculativeDraft?.catch(() => undefined);
 
-  const { intent: detected, remember } = await classified;
+  const { intent: detected, remember, visual } = await classified;
   if (detected === 'context') return answerAboutContext(routers, question);
 
-  // The context is updated while the answer is written.
+  // The context is updated, and pictures for an explanation are looked for, while the answer is written.
   const contextUpdate = remember ? updateContextQuietly(routers, question) : Promise.resolve(undefined);
+  const pictures =
+    visual && routers.illustrations && (detected === 'text' || detected === 'search')
+      ? findIllustrations(routers.illustrations, routers.review, question, routers.meter)
+      : Promise.resolve([]);
   const reply = await answerFor(detected, routers, history, question, attachments, speculativeDraft);
-  const update = await contextUpdate;
-  return update ? { ...reply, contextUpdate: update } : reply;
+  const [update, illustrations] = await Promise.all([contextUpdate, pictures]);
+  const withPictures = reply.text !== undefined && illustrations.length ? { ...reply, illustrations } : reply;
+  return update ? { ...withPictures, contextUpdate: update } : withPictures;
 }
 
 async function answerFor(
