@@ -38,6 +38,9 @@ export interface Env {
   YOUTUBE_BASE_URL?: string;
   /** User-Agent sent to Nominatim, whose usage policy asks for an identifying one. */
   NOMINATIM_USER_AGENT?: string;
+  /** Pictures for explanations: Wikimedia Commons API (override for local mocks) and the User-Agent its policy asks for. */
+  COMMONS_API_URL?: string;
+  WIKIMEDIA_USER_AGENT?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   /** Optional overrides, used to point Google sign-in at a local mock. */

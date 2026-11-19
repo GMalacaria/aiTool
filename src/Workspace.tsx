@@ -207,6 +207,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
           sources: result.sources,
           contextUpdate: result.contextUpdate,
           media: result.media,
+          illustrations: result.illustrations,
         },
       ]);
       setRemaining(result.remaining);
