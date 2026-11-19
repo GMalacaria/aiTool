@@ -2,7 +2,8 @@
 import pdfMake from 'pdfmake/build/pdfmake';
 import vfs from 'pdfmake/build/vfs_fonts';
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
-import { hasTabularData, isNumericColumn, type DocumentSpec } from '../../shared/document';
+import { hasTabularData, isNumericColumn, type DocumentBlock, type DocumentSpec } from '../../shared/document';
+import { renderDiagramPng, type DiagramImage } from '../diagrams/render';
 import { chartSvg, formatNumber } from './chart';
 import { DATA_DISCLAIMER } from './files';
 
@@ -11,8 +12,26 @@ pdfMake.addVirtualFileSystem(vfs);
 const TEXT_COLOR = '#1a1a1a';
 const MUTED_COLOR = '#5c5c5c';
 const OPTION_LETTERS = 'abcdefgh';
+/** A4 width minus the margins, and the tallest a diagram may be, in points. */
+const CONTENT_WIDTH = 499;
+const MAX_DIAGRAM_HEIGHT = 640;
+const POINTS_PER_PIXEL = 0.75;
 
-export function buildDefinition(document: DocumentSpec, now: Date = new Date()): TDocumentDefinitions {
+export type DiagramImages = Map<DocumentBlock, DiagramImage | null>;
+
+/** Diagram size in the PDF: its natural size, shrunk to fit the page. */
+export function diagramSize(image: Pick<DiagramImage, 'width' | 'height'>): { width: number; height: number } {
+  const width = image.width * POINTS_PER_PIXEL;
+  const height = image.height * POINTS_PER_PIXEL;
+  const scale = Math.min(1, CONTENT_WIDTH / width, MAX_DIAGRAM_HEIGHT / height);
+  return { width: width * scale, height: height * scale };
+}
+
+export function buildDefinition(
+  document: DocumentSpec,
+  now: Date = new Date(),
+  diagrams: DiagramImages = new Map(),
+): TDocumentDefinitions {
   const content: Content[] = [
     { text: document.title, style: 'title' },
     { text: new Intl.DateTimeFormat('it-IT', { dateStyle: 'long' }).format(now), style: 'muted', margin: [0, 0, 0, 12] },
@@ -74,6 +93,20 @@ export function buildDefinition(document: DocumentSpec, now: Date = new Date()):
           margin: [0, 0, 0, 12],
         });
         break;
+      case 'diagram': {
+        const image = diagrams.get(block);
+        content.push({
+          unbreakable: true,
+          stack: [
+            ...(block.title ? [{ text: block.title, style: 'caption' }] : []),
+            image
+              ? { image: image.dataUrl, ...diagramSize(image), alignment: 'center' as const }
+              : { text: 'Schema non disponibile in questo file.', style: 'muted', italics: true },
+          ],
+          margin: [0, 0, 0, 12],
+        });
+        break;
+      }
       case 'quiz':
         for (const question of block.questions) {
           questionNumber += 1;
@@ -128,6 +161,21 @@ export function buildDefinition(document: DocumentSpec, now: Date = new Date()):
   };
 }
 
+/** Draws every diagram as a picture first; one that cannot be drawn is noted in the file. */
+async function drawDiagrams(document: DocumentSpec): Promise<DiagramImages> {
+  const images: DiagramImages = new Map();
+  for (const block of document.blocks) {
+    if (block.type !== 'diagram') continue;
+    try {
+      images.set(block, await renderDiagramPng(block.code));
+    } catch (error) {
+      console.warn('Diagram not drawn in the PDF', error);
+      images.set(block, null);
+    }
+  }
+  return images;
+}
+
 export async function createPdf(document: DocumentSpec): Promise<Blob> {
-  return pdfMake.createPdf(buildDefinition(document)).getBlob();
+  return pdfMake.createPdf(buildDefinition(document, new Date(), await drawDiagrams(document))).getBlob();
 }

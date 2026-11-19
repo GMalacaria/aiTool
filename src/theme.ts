@@ -67,3 +67,32 @@ export function useSystemPrefersDark(): boolean {
 
   return dark;
 }
+
+/** True when the page is dark: the user's choice on this device, else the system's. */
+function pageIsDark(): boolean {
+  if (typeof window === 'undefined') return false;
+  const choice = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]')?.content;
+  if (choice === 'dark' || choice === 'light') return choice === 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+/** Whether the page is currently dark, updated when the system or the setting changes. */
+export function usePageIsDark(): boolean {
+  const [dark, setDark] = useState(pageIsDark);
+
+  useEffect(() => {
+    const update = () => setDark(pageIsDark());
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    query.addEventListener('change', update);
+    // Settings → Aspetto changes the <meta name="color-scheme"> (also from other tabs).
+    const observer = new MutationObserver(update);
+    const meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) observer.observe(meta, { attributes: true, attributeFilter: ['content'] });
+    return () => {
+      query.removeEventListener('change', update);
+      observer.disconnect();
+    };
+  }, []);
+
+  return dark;
+}

@@ -2055,6 +2055,58 @@ select {
   overflow-wrap: anywhere;
 }
 
+/* Mermaid diagrams: drawn in the page's colours, shrunk to the width of the chat */
+
+.copy-diagram,
+.doc-diagram .diagram {
+  padding: 2.5rem 0.75rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: light-dark(#ffffff, #0d1620);
+}
+
+.doc-diagram .diagram {
+  padding-top: 0.75rem;
+}
+
+.diagram {
+  overflow-x: auto;
+}
+
+.diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.diagram-loading {
+  display: grid;
+  place-items: center;
+  min-height: 8rem;
+  color: var(--muted);
+}
+
+.diagram-failed {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.markdown .diagram-failed pre,
+.doc-diagram .diagram-failed pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+.doc-diagram {
+  margin: 0;
+}
+
+.doc-diagram figcaption {
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
 .copy-button {
   position: absolute;
   top: 0.35rem;

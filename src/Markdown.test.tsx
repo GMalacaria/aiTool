@@ -19,6 +19,14 @@ describe('Markdown', () => {
     expect(html).toContain('copy-code');
   });
 
+  it('turns mermaid blocks into diagrams with a copy icon for their source', () => {
+    const html = render(['Ecco:', '', '```mermaid', 'flowchart TD', '  A --> B', '```'].join('\n'));
+    expect(html).toContain('copy-diagram');
+    expect(html).toContain('Preparazione dello schema');
+    expect(html).toContain('aria-label="Copia il codice dello schema"');
+    expect(html).not.toContain('<pre>');
+  });
+
   it('keeps the answer headings below the "Risposta" label', () => {
     const html = render('# Uno\n\n## Due\n\n#### Quattro');
     expect(html).not.toMatch(/<h1|<h2/);

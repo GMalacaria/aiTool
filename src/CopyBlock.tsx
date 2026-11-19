@@ -3,11 +3,20 @@ import { CheckIcon, CopyIcon } from './ui/icons';
 
 const COPIED_MS = 2000;
 
+type Variant = 'card' | 'code' | 'diagram';
+
+const LABELS: Record<Variant, string> = {
+  card: 'Copia il testo',
+  code: 'Copia il codice',
+  diagram: 'Copia il codice dello schema',
+};
+
 /**
  * A block with a copy icon at its top right: text ready to paste elsewhere
- * (an email, a message, instructions) shown as a card, or a code block.
+ * (an email, a message, instructions) shown as a card, a code block, or a
+ * diagram whose Mermaid source is copied.
  */
-export function CopyBlock({ text, variant, children }: { text: string; variant: 'card' | 'code'; children: ReactNode }) {
+export function CopyBlock({ text, variant, children }: { text: string; variant: Variant; children: ReactNode }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   useEffect(() => {
@@ -26,13 +35,13 @@ export function CopyBlock({ text, variant, children }: { text: string; variant: 
   };
 
   return (
-    <div className={variant === 'card' ? 'copy-block copy-card' : 'copy-block copy-code'}>
+    <div className={`copy-block copy-${variant}`}>
       {children}
       <button
         type="button"
         className="icon-button copy-button"
         onClick={copy}
-        aria-label={variant === 'card' ? 'Copia il testo' : 'Copia il codice'}
+        aria-label={LABELS[variant]}
         title="Copia"
       >
         {state === 'copied' ? <CheckIcon size={18} /> : <CopyIcon size={18} />}
