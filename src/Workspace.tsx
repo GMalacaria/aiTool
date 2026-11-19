@@ -373,6 +373,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
             tokenLimit={account.tokenLimit}
             freeMode={freeMode}
             freeAvailable={account.freeAvailable}
+            dictation={account.profile === 'professional'}
             onSend={send}
             onVerifySources={verifySources}
             onNewChat={startNewChat}

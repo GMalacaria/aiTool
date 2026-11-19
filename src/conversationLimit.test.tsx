@@ -26,7 +26,7 @@ const render = (messages: ConversationMessage[]) =>
       tokensUsed={0}
       tokenLimit={1000}
       freeMode={false}
-      freeAvailable={true}
+      freeAvailable={true} dictation={false}
       onSend={async () => true}
       onVerifySources={async () => true}
       onNewChat={() => undefined}

@@ -1679,6 +1679,24 @@ select {
   cursor: not-allowed;
 }
 
+.composer-mic[data-recording] {
+  background: var(--accent);
+  color: var(--on-accent);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-mic[data-recording] {
+    animation: none;
+  }
+}
+
 .send-button {
   display: none;
   flex-shrink: 0;
@@ -1709,6 +1727,15 @@ select {
 
   .composer-row:has(.composer-mode-wrap) .send-button {
     margin-left: auto;
+  }
+
+  /* The microphone sits at the right edge, next to send. */
+  .composer-row:has(.composer-mode-wrap) .composer-mic {
+    margin-left: auto;
+  }
+
+  .composer-row:has(.composer-mic) .send-button {
+    margin-left: 0;
   }
 
   /* Icons only: the labels stay for screen readers. */
