@@ -1,8 +1,38 @@
 import { useMemo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { parseMarkerHref, type AnswerSources } from '../shared/sources';
+import { CopyBlock } from './CopyBlock';
 import { MarkerView, SourceLegend, UncheckedNotice } from './Sources';
+
+/** The fence language that marks text ready to paste elsewhere (see SYSTEM_PROMPT). */
+export const COPY_LANGUAGE = 'copy';
+
+type HastNode = NonNullable<ExtraProps['node']>;
+
+/** The plain text of a syntax-tree node. */
+function textOf(node: HastNode | HastNode['children'][number]): string {
+  if (node.type === 'text') return node.value;
+  return 'children' in node ? node.children.map((child) => textOf(child as HastNode)).join('') : '';
+}
+
+/** A fenced block: ```copy becomes a card, any other a code block; both with a copy icon. */
+function CodeBlock({ node, children }: { node?: HastNode; children?: React.ReactNode }) {
+  const code = node?.children.find((child) => child.type === 'element' && child.tagName === 'code');
+  const classes = code?.type === 'element' ? code.properties.className : undefined;
+  const isCard = Array.isArray(classes) && classes.includes(`language-${COPY_LANGUAGE}`);
+  const text = (code ? textOf(code) : '').replace(/\n$/, '');
+
+  return isCard ? (
+    <CopyBlock text={text} variant="card">
+      <p className="copy-card-text">{text}</p>
+    </CopyBlock>
+  ) : (
+    <CopyBlock text={text} variant="code">
+      <pre>{children}</pre>
+    </CopyBlock>
+  );
+}
 
 /**
  * Renders the model's Markdown. It is built as React elements, never as an HTML
@@ -16,6 +46,7 @@ const components: Components = {
       {children}
     </a>
   ),
+  pre: ({ node, children }) => <CodeBlock node={node}>{children}</CodeBlock>,
   img: ({ alt }) => (alt ? <span className="md-image-alt">{alt}</span> : null),
   table: ({ node: _node, children }) => (
     <div className="md-table">

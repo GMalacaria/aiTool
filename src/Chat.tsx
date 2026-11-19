@@ -5,7 +5,9 @@ import { MAX_QUESTIONS_PER_CONVERSATION, QUESTIONS_LEFT_WARNING } from '../share
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
 import { GeneratedImage } from './GeneratedImage';
+import { Illustrations } from './Illustrations';
 import { ContextNote } from './ContextNote';
+import { MediaView } from './MediaView';
 import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
 import { CloseIcon, MicIcon, PlusIcon, ReasonIcon, SendIcon, StopIcon, VerifiedIcon } from './ui/icons';
@@ -502,6 +504,8 @@ export function Chat({
                     onUndo={message.id !== undefined ? () => onUndoContext(message.id as number) : undefined}
                   />
                 )}
+                {message.role === 'assistant' && message.illustrations && <Illustrations items={message.illustrations} />}
+                {message.role === 'assistant' && message.media && <MediaView media={message.media} />}
                 {message.role === 'assistant' && message.freeModel && (
                   <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
                 )}

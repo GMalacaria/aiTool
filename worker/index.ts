@@ -19,6 +19,8 @@ import { IMAGE_REFUSAL_FALLBACK, imageMessageContent } from './prompts';
 import { parseDocument } from '../shared/document';
 import { MAX_QUESTIONS_PER_CONVERSATION } from '../shared/conversation';
 import { normalizeContext, parseContextUpdate } from '../shared/context';
+import { parseIllustrations } from '../shared/illustrations';
+import { parseMedia } from '../shared/media';
 import { parseSources } from '../shared/sources';
 import {
   generateTitle,
@@ -164,12 +166,14 @@ function toClientMessage(message: ConversationMessage) {
   const freeModel = message.freeModel ? true : undefined;
   const sources = message.sources ? (parseSources(message.sources) ?? undefined) : undefined;
   const contextUpdate = message.contextUpdate ? (parseContextUpdate(message.contextUpdate) ?? undefined) : undefined;
+  const media = message.media ? (parseMedia(message.media) ?? undefined) : undefined;
+  const illustrations = message.illustrations ? (parseIllustrations(message.illustrations) ?? undefined) : undefined;
   const id = message.id;
   if (message.imageId) return { id, role: message.role, content: '', image: { id: message.imageId }, contextUpdate };
 
   return document
     ? { id, role: message.role, content: document.title, document, freeModel, contextUpdate }
-    : { id, role: message.role, content: message.content, attachments, freeModel, sources, contextUpdate };
+    : { id, role: message.role, content: message.content, attachments, freeModel, sources, contextUpdate, media, illustrations };
 }
 
 app.use(requireSameOrigin);
@@ -335,6 +339,29 @@ app.get('/images/:id', requireUser, requireApproved, async (c) => {
   });
 });
 
+/**
+ * The preview picture of a video, fetched by the server: opening a chat never
+ * contacts YouTube from the browser until the user taps play.
+ */
+app.get('/media/youtube/:id/thumbnail', requireUser, requireApproved, async (c) => {
+  const id = c.req.param('id');
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return c.json({ error: 'not_found' }, 404);
+  const response = await fetch(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`, { signal: AbortSignal.timeout(8_000) }).catch(
+    () => null,
+  );
+  const type = response?.headers.get('Content-Type') ?? '';
+  if (!response?.ok || !/^image\/(jpeg|png|webp)$/.test(type)) return c.json({ error: 'not_found' }, 404);
+
+  return new Response(response.body, {
+    headers: {
+      'Content-Type': type,
+      'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    },
+  });
+});
+
 app.post('/chat', requireUser, requireApproved, async (c) => {
   const user = c.get('user');
   const request = parseChatRequest(await c.req.json().catch(() => null));
@@ -415,6 +442,20 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
               }
             : undefined,
           profile: user.profile,
+          illustrations: {
+            isFlagged: (text) => isFlagged(c.env, text),
+            commonsURL: c.env.COMMONS_API_URL,
+            userAgent: c.env.WIKIMEDIA_USER_AGENT,
+          },
+          media: {
+            isFlagged: (text) => isFlagged(c.env, text),
+            youtubeKey: c.env.YOUTUBE_API_KEY,
+            youtubeBaseURL: c.env.YOUTUBE_BASE_URL,
+            nominatimBaseURL: c.env.NOMINATIM_BASE_URL,
+            userAgent: c.env.NOMINATIM_USER_AGENT,
+            // Only a photo request searches the web, paid by the owner like verified sources.
+            search: () => sourcesConfig(c.env, db, day, 'standard', freeMode),
+          },
           images: {
             enabled: imagesEnabled(c.env),
             isFlagged: (text) => isFlagged(c.env, text),
@@ -502,7 +543,7 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       const free = meter.answeredByFreeModel;
       conversation = result.document
         ? await saveExchange(db, user, request.conversationId, request.message, JSON.stringify(result.document), 'document', stored, null, free, await titlePromise, null, result.contextUpdate ?? null)
-        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null, result.contextUpdate ?? null);
+        : await saveExchange(db, user, request.conversationId, request.message, result.text ?? '', 'text', stored, null, free, await titlePromise, result.sources ?? null, result.contextUpdate ?? null, result.media ?? null, result.illustrations ?? null);
     }
 
     uploadedImages = [];
@@ -516,6 +557,8 @@ app.post('/chat', requireUser, requireApproved, async (c) => {
       image: imageId ? { id: imageId } : undefined,
       sources: result.text !== undefined ? (result.sources ?? undefined) : undefined,
       contextUpdate: result.contextUpdate,
+      media: result.media,
+      illustrations: result.illustrations,
       deep,
       remaining: Math.max(0, user.dailyMessageLimit - used),
       deepRemaining: Math.max(0, user.dailyDeepLimit - (await getUsedDeepMessages(db, user, day))),

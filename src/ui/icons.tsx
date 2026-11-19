@@ -119,3 +119,16 @@ export const ShareIcon = (props: IconProps) => (
     <path d="M12 15V4M8 7.5l4-4 4 4M7.5 10.5H6a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7.5a1 1 0 0 0-1-1h-1.5" />
   </Svg>
 );
+
+export const CopyIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+    <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" />
+  </Svg>
+);
+
+export const CheckIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="m5 12.5 4.5 4.5L19 7.5" />
+  </Svg>
+);
