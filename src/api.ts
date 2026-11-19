@@ -175,22 +175,16 @@ async function request<T>(path: string, method = 'GET', payload?: unknown): Prom
   return body as T;
 }
 
-/** Sends a dictation to the server and returns the recognised text. */
-export async function transcribeAudio(audio: Blob): Promise<string> {
-  const form = new FormData();
-  form.append('audio', audio, 'recording.webm');
-  let response: Response;
-  try {
-    response = await fetch('/api/transcribe', { method: 'POST', body: form });
-  } catch {
-    throw new ApiError('service_unavailable');
-  }
-  const body = (await response.json().catch(() => null)) as { text?: string; error?: string } | null;
-  if (!response.ok || typeof body?.text !== 'string') {
-    throw new ApiError(KNOWN_ERRORS.find((known) => known === body?.error) ?? 'service_unavailable');
-  }
-  return body.text;
+export interface DictationSession {
+  /** Temporary key for one transcription session. */
+  secret: string;
+  expiresAt: number;
+  /** WebSocket address of the transcription service. */
+  url: string;
 }
+
+/** Opens a live dictation: the server hands out a short-lived key (professional profile only). */
+export const createDictationSession = () => request<DictationSession>('/transcribe/session', 'POST');
 
 export const imageUrl = (id: string) => `/api/images/${encodeURIComponent(id)}`;
 
