@@ -1,35 +1,63 @@
+import { DICTATION_SAMPLE_RATE } from '../shared/dictation';
 import type { Env } from './env';
 
-/** Default transcription model; overridable with OPENAI_TRANSCRIBE_MODEL. */
-export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-transcribe';
+/** Live transcription model (OpenAI Realtime API); overridable with OPENAI_TRANSCRIBE_MODEL. */
+export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-live-transcribe';
 
-/** A dictation is a few sentences: 5 MB is minutes of compressed audio. */
-export const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
+/** How long the temporary key can be used to open the connection. */
+const SECRET_TTL_SECONDS = 60;
+
+export interface DictationSession {
+  /** Temporary key, valid for one transcription session only: the real key never leaves the server. */
+  secret: string;
+  /** Unix seconds after which the key can no longer open a connection. */
+  expiresAt: number;
+  /** WebSocket address the browser connects to. */
+  url: string;
+}
 
 export class TranscriptionError extends Error {
-  constructor(readonly reason: 'unavailable') {
-    super(reason);
+  constructor() {
+    super('transcription unavailable');
     this.name = 'TranscriptionError';
   }
 }
 
-/** Sends one recording to OpenAI and returns the recognised Italian text. */
-export async function transcribe(env: Env, audio: File, fetchFn: typeof fetch = fetch): Promise<string> {
+/**
+ * Asks OpenAI for a short-lived key bound to an Italian transcription session.
+ * The browser then sends the microphone audio to OpenAI directly: the audio
+ * never passes through the Worker (whose CPU budget could not handle it).
+ */
+export async function createDictationSession(env: Env, fetchFn: typeof fetch = fetch): Promise<DictationSession> {
   const baseURL = (env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-  const form = new FormData();
-  form.append('file', audio, audio.name || 'recording.webm');
-  form.append('model', env.OPENAI_TRANSCRIBE_MODEL ?? DEFAULT_TRANSCRIBE_MODEL);
-  form.append('language', 'it');
-  form.append('response_format', 'json');
-
-  const response = await fetchFn(`${baseURL}/audio/transcriptions`, {
+  const response = await fetchFn(`${baseURL}/realtime/client_secrets`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-    body: form,
+    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      expires_after: { anchor: 'created_at', seconds: SECRET_TTL_SECONDS },
+      session: {
+        type: 'transcription',
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: DICTATION_SAMPLE_RATE },
+            noise_reduction: { type: 'near_field' },
+            transcription: { model: env.OPENAI_TRANSCRIBE_MODEL ?? DEFAULT_TRANSCRIBE_MODEL, languages: ['it'] },
+            // The model has no server-side turn detection: the browser detects pauses and commits each segment.
+            turn_detection: null,
+          },
+        },
+      },
+    }),
   });
-  if (!response.ok) throw new TranscriptionError('unavailable');
+  if (!response.ok) throw new TranscriptionError();
 
-  const body = (await response.json().catch(() => null)) as { text?: unknown } | null;
-  if (typeof body?.text !== 'string') throw new TranscriptionError('unavailable');
-  return body.text.trim();
+  const body = (await response.json().catch(() => null)) as { value?: unknown; expires_at?: unknown } | null;
+  if (typeof body?.value !== 'string' || !body.value || typeof body.expires_at !== 'number') {
+    throw new TranscriptionError();
+  }
+  return {
+    secret: body.value,
+    expiresAt: body.expires_at,
+    url: `${baseURL.replace(/^http/, 'ws')}/realtime`,
+  };
 }

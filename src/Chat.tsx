@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/attachments';
-import { transcribeAudio, type ConversationMessage } from './api';
+import type { ConversationMessage } from './api';
+import { DictationError, startLiveDictation, type DictationEnd, type LiveDictation } from './dictation/live';
+import { joinDraft } from './dictation/transcript';
 import { MAX_QUESTIONS_PER_CONVERSATION, QUESTIONS_LEFT_WARNING } from '../shared/conversation';
 import { addFiles } from './attachments/read';
 import { DocumentView } from './documents/DocumentView';
@@ -45,8 +47,23 @@ interface ChatProps {
 
 const MAX_MESSAGE_CHARS = 4000;
 
-/** A dictation stops by itself after two minutes. */
-const DICTATION_MAX_MS = 120_000;
+const DICTATION_FAILURES: Record<DictationError['reason'], string> = {
+  unsupported: 'Il dettato non è supportato da questo browser.',
+  denied: 'Accesso al microfono negato: consentilo nelle impostazioni del browser.',
+  unavailable: 'Dettato non disponibile in questo momento, riprova.',
+};
+
+const DICTATION_ENDINGS: Partial<Record<DictationEnd, string>> = {
+  'no-speech': 'Nessun parlato rilevato.',
+  unavailable: 'Dettato non disponibile in questo momento, riprova.',
+  error: 'Dettato interrotto, riprova.',
+};
+
+const DICTATION_STATUS = {
+  connecting: 'Attivazione del microfono',
+  listening: 'In ascolto: il testo compare mentre parli. Dopo una pausa lunga il dettato si ferma da solo.',
+  finishing: 'Completamento del testo',
+} as const;
 
 /** Shown in turn on the empty page. The tool presents itself as a tool. */
 const WELCOME = ['Sono uno strumento a tua disposizione', 'Da dove iniziamo?', 'Di cosa hai bisogno?'] as const;
@@ -130,9 +147,8 @@ export function Chat({
   const [notes, setNotes] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [mode, setMode] = useState<AnswerMode>('normal');
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const [dictating, setDictating] = useState<'idle' | keyof typeof DICTATION_STATUS>('idle');
+  const dictationRef = useRef<LiveDictation | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -149,7 +165,7 @@ export function Chat({
   // "Ragiona" needs the paid model and an allowance left.
   const deepAvailable = deepRemaining > 0 && !freeMode;
   const deep = mode === 'deep' && deepAvailable;
-  const cannotSend = pending || reading || recording || transcribing || limitReached || !draft.trim();
+  const cannotSend = pending || reading || dictating !== 'idle' || limitReached || !draft.trim();
   const tokenShare = tokenLimit > 0 ? Math.min(100, Math.round((tokensUsed / tokenLimit) * 100)) : 100;
 
   async function send() {
@@ -182,69 +198,38 @@ export function Chat({
     }
   }
 
-  // Dictation: the recognised text is appended to the field and never sent by itself.
+  // Live dictation: the text appears in the field while the user speaks and is never sent by itself.
   async function toggleDictation() {
-    if (recorderRef.current) {
-      recorderRef.current.stop();
+    if (dictating === 'connecting' || dictating === 'listening') {
+      dictationRef.current?.stop();
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setNotes(['Il dettato non è supportato da questo browser.']);
-      return;
-    }
+    if (dictating !== 'idle') return;
 
-    let stream: MediaStream;
+    const before = draft;
+    setNotes([]);
+    setDictating('connecting');
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setNotes(['Accesso al microfono negato: consentilo nelle impostazioni del browser.']);
-      return;
-    }
-
-    const recorder = new MediaRecorder(stream);
-    const chunks: Blob[] = [];
-    // A dictation is short; the server also refuses anything above 5 MB.
-    const limit = window.setTimeout(() => recorder.state === 'recording' && recorder.stop(), DICTATION_MAX_MS);
-    recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
-    recorder.onstop = () => {
-      window.clearTimeout(limit);
-      stream.getTracks().forEach((track) => track.stop());
-      recorderRef.current = null;
-      setRecording(false);
-      if (!chunks.length) return;
-
-      setTranscribing(true);
-      transcribeAudio(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))
-        .then((text) => {
-          if (!text) {
-            setNotes(['Nessun parlato riconosciuto.']);
-            return;
-          }
-          setNotes([]);
-          setDraft((current) => `${current}${current && !/\s$/.test(current) ? ' ' : ''}${text}`.slice(0, MAX_MESSAGE_CHARS));
+      dictationRef.current = await startLiveDictation({
+        onText: (text) => setDraft(joinDraft(before, text).slice(0, MAX_MESSAGE_CHARS)),
+        onListening: () => setDictating('listening'),
+        onFinishing: () => setDictating('finishing'),
+        onEnd: (reason) => {
+          dictationRef.current = null;
+          setDictating('idle');
+          const note = DICTATION_ENDINGS[reason];
+          if (note) setNotes([note]);
           inputRef.current?.focus();
-        })
-        .catch(() => setNotes(['Trascrizione non riuscita, riprova.']))
-        .finally(() => setTranscribing(false));
-    };
-    recorderRef.current = recorder;
-    recorder.start();
-    setRecording(true);
+        },
+      });
+    } catch (error) {
+      setDictating('idle');
+      setNotes([DICTATION_FAILURES[error instanceof DictationError ? error.reason : 'unavailable']]);
+    }
   }
 
   // Leaving the page releases the microphone.
-  useEffect(
-    () => () => {
-      const recorder = recorderRef.current;
-      if (recorder?.state === 'recording') {
-        recorder.ondataavailable = null;
-        recorder.onstop = null;
-        recorder.stream.getTracks().forEach((track) => track.stop());
-        recorder.stop();
-      }
-    },
-    [],
-  );
+  useEffect(() => () => dictationRef.current?.cancel(), []);
 
   async function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
@@ -347,9 +332,9 @@ export function Chat({
             ))}
           </ul>
         )}
-        {(recording || transcribing) && (
+        {dictating !== 'idle' && (
           <p role="status" className="muted composer-reading">
-            {recording ? 'Registrazione in corso: premi di nuovo il microfono per terminare' : 'Trascrizione in corso'}
+            {DICTATION_STATUS[dictating]}
           </p>
         )}
 
@@ -393,6 +378,8 @@ export function Chat({
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={limitReached}
+            // While dictating the text is written by the dictation; it can be edited afterwards.
+            readOnly={dictating !== 'idle'}
             autoFocus
           />
 
@@ -435,13 +422,13 @@ export function Chat({
             <button
               type="button"
               className="icon-button composer-mic"
-              data-recording={recording || undefined}
-              aria-label={recording ? 'Termina il dettato' : 'Detta il testo'}
-              title={recording ? 'Termina il dettato' : 'Detta il testo'}
+              data-recording={dictating === 'listening' || undefined}
+              aria-label={dictating === 'idle' ? 'Detta il testo' : 'Termina il dettato'}
+              title={dictating === 'idle' ? 'Detta il testo' : 'Termina il dettato'}
               onClick={() => void toggleDictation()}
-              disabled={pending || reading || transcribing || limitReached}
+              disabled={pending || reading || dictating === 'finishing' || limitReached}
             >
-              {recording ? <StopIcon /> : <MicIcon />}
+              {dictating === 'idle' ? <MicIcon /> : <StopIcon />}
             </button>
           )}
 

@@ -1,39 +1,48 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from './env';
-import { transcribe, TranscriptionError } from './transcribe';
+import { createDictationSession, TranscriptionError } from './transcribe';
 
 const env = (overrides: Partial<Env> = {}): Env => ({ OPENAI_API_KEY: 'openai-key', ...overrides }) as Env;
 const asFetch = (fn: unknown) => fn as typeof fetch;
-const audio = new File([new Uint8Array([1, 2, 3])], 'recording.webm', { type: 'audio/webm' });
 
-describe('transcribe', () => {
-  it('sends the recording to the transcription endpoint in Italian and returns the trimmed text', async () => {
-    const fetchFn = vi.fn(async () => Response.json({ text: '  Ciao a tutti.  ' }));
+describe('createDictationSession', () => {
+  it('asks for a short-lived key bound to an Italian live transcription session', async () => {
+    const fetchFn = vi.fn(async () => Response.json({ value: 'ek_123', expires_at: 1_800_000_000, session: {} }));
 
-    await expect(transcribe(env(), audio, asFetch(fetchFn))).resolves.toBe('Ciao a tutti.');
+    await expect(createDictationSession(env(), asFetch(fetchFn))).resolves.toEqual({
+      secret: 'ek_123',
+      expiresAt: 1_800_000_000,
+      url: 'wss://api.openai.com/v1/realtime',
+    });
 
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/audio/transcriptions');
+    expect(url).toBe('https://api.openai.com/v1/realtime/client_secrets');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer openai-key');
-    const form = init.body as FormData;
-    expect(form.get('model')).toBe('gpt-transcribe');
-    expect(form.get('language')).toBe('it');
-    expect(form.get('file')).toBeInstanceOf(File);
+    const body = JSON.parse(init.body as string);
+    expect(body.expires_after).toEqual({ anchor: 'created_at', seconds: 60 });
+    expect(body.session.type).toBe('transcription');
+    expect(body.session.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24_000 });
+    expect(body.session.audio.input.transcription).toEqual({ model: 'gpt-live-transcribe', languages: ['it'] });
+    expect(body.session.audio.input.turn_detection).toBeNull();
   });
 
   it('honours the model and base URL overrides', async () => {
-    const fetchFn = vi.fn(async () => Response.json({ text: 'x' }));
-    await transcribe(env({ OPENAI_BASE_URL: 'http://mock/v1/', OPENAI_TRANSCRIBE_MODEL: 'other' }), audio, asFetch(fetchFn));
+    const fetchFn = vi.fn(async () => Response.json({ value: 'ek', expires_at: 1 }));
+    const session = await createDictationSession(
+      env({ OPENAI_BASE_URL: 'http://127.0.0.1:8788/v1/', OPENAI_TRANSCRIBE_MODEL: 'other' }),
+      asFetch(fetchFn),
+    );
 
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('http://mock/v1/audio/transcriptions');
-    expect((init.body as FormData).get('model')).toBe('other');
+    expect(url).toBe('http://127.0.0.1:8788/v1/realtime/client_secrets');
+    expect(JSON.parse(init.body as string).session.audio.input.transcription.model).toBe('other');
+    expect(session.url).toBe('ws://127.0.0.1:8788/v1/realtime');
   });
 
   it.each([
     ['an error status', () => new Response('x', { status: 500 })],
-    ['a malformed body', () => Response.json({ nope: true })],
+    ['a body without the key', () => Response.json({ expires_at: 1 })],
   ])('fails on %s', async (_label, reply) => {
-    await expect(transcribe(env(), audio, asFetch(vi.fn(async () => reply())))).rejects.toBeInstanceOf(TranscriptionError);
+    await expect(createDictationSession(env(), asFetch(vi.fn(async () => reply())))).rejects.toBeInstanceOf(TranscriptionError);
   });
 });

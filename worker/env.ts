@@ -5,7 +5,7 @@ export interface Env {
   OPENAI_API_KEY: string;
   /** Optional override, used to point the OpenAI provider at a local mock. */
   OPENAI_BASE_URL?: string;
-  /** Optional override of the dictation model (default `gpt-transcribe`). */
+  /** Optional override of the live dictation model (default `gpt-live-transcribe`). */
   OPENAI_TRANSCRIBE_MODEL?: string;
   /** Optional free-tier fallbacks, used when OpenAI fails. Each is enabled by its key. */
   GROQ_API_KEY?: string;

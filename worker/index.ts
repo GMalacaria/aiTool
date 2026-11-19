@@ -58,7 +58,7 @@ import {
   searchConversations,
   saveExchange,
 } from './conversations';
-import { MAX_AUDIO_BYTES, transcribe } from './transcribe';
+import { createDictationSession } from './transcribe';
 import { PROFILES, type AppEnv, type Env, type UserStatus } from './env';
 import { getRouter, hasFreeProviders, OPENAI_MODELS, OPENAI_PRICES, type Tier } from './llm/providers';
 import { DEFAULT_GEMINI_BASE_URL, DEFAULT_VERIFY_MODEL, verifyAnswer, type SourcesConfig } from './sources';
@@ -674,27 +674,22 @@ app.post('/messages/:id/verify', requireUser, requireApproved, async (c) => {
 });
 
 /**
- * Dictation: turns a recording into text for the request field. Professional
- * profile only (students must write their own text). The text is returned,
- * never sent as a message, and the audio is not stored.
+ * Live dictation: returns a short-lived key with which the browser streams the
+ * microphone to OpenAI and gets the text back while the user speaks.
+ * Professional profile only (students must write their own text). The text
+ * goes into the request field, never sent as a message; the audio is not stored.
  */
-app.post('/transcribe', requireUser, requireApproved, async (c) => {
+app.post('/transcribe/session', requireUser, requireApproved, async (c) => {
   const user = c.get('user');
   if (user.profile !== 'professional') return c.json({ error: 'forbidden' }, 403);
 
-  const declared = Number(c.req.header('Content-Length') ?? 0);
-  if (declared > MAX_AUDIO_BYTES + 64 * 1024) return c.json({ error: 'invalid_request' }, 413);
-
-  const form = await c.req.formData().catch(() => null);
-  const audio = form?.get('audio');
-  if (!(audio instanceof File) || audio.size === 0 || audio.size > MAX_AUDIO_BYTES) {
-    return c.json({ error: 'invalid_request' }, 400);
-  }
-
   try {
-    return c.json({ text: await transcribe(c.env, audio) });
+    const session = await createDictationSession(c.env);
+    // The key must not be kept by any cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(session);
   } catch (error) {
-    console.error('transcription failed', error);
+    console.error('dictation session failed', error);
     return c.json({ error: 'service_unavailable' }, 503);
   }
 });

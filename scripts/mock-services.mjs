@@ -166,10 +166,6 @@ createServer(async (req, res) => {
   try {
     if (req.method === 'POST' && url.pathname.endsWith(':generateContent')) return imageCompletion(res, await readBody(req));
     if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) return chatCompletion(res, await readBody(req), url);
-    if (req.method === 'POST' && url.pathname.endsWith('/audio/transcriptions')) {
-      await readBody(req);
-      return json(res, 200, { text: 'Questo è un testo dettato di prova.' });
-    }
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') return authorizePage(res, url);
     if (req.method === 'GET' && url.pathname === '/oauth/continue') return authorizeContinue(res, url);
     if (req.method === 'POST' && url.pathname === '/oauth/token') return token(res, await readBody(req));
