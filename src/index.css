@@ -2002,3 +2002,41 @@ select {
 .media-title {
   color: var(--text);
 }
+
+/* Text ready to paste elsewhere, and code blocks: a copy icon at the top right */
+
+.copy-block {
+  position: relative;
+  margin: 0.75rem 0;
+}
+
+.markdown .copy-block pre {
+  margin: 0;
+  padding-right: 2.75rem;
+}
+
+.copy-card {
+  padding: 0.9rem 2.9rem 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface);
+}
+
+.markdown .copy-card-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.copy-button {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 2rem;
+  height: 2rem;
+}
+
+.copy-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

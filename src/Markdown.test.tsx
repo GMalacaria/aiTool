@@ -16,6 +16,7 @@ describe('Markdown', () => {
     expect(html).toContain('<ul>');
     expect(html).toContain('<strong>importante</strong>');
     expect(html).toContain('<pre><code>A -&gt; B');
+    expect(html).toContain('copy-code');
   });
 
   it('keeps the answer headings below the "Risposta" label', () => {
@@ -88,5 +89,20 @@ describe('source markers', () => {
   it('says when the sources could not be checked', () => {
     const html = renderToStaticMarkup(<Markdown text="Testo." sources={{ ...sources, verified: false }} />);
     expect(html).toContain('Fonti consultate (verifica non disponibile)');
+  });
+
+  it('shows text ready to paste as a card with a copy button, without Markdown inside', () => {
+    const html = render(['Ecco la mail:', '', '```copy', 'Gentile Mario,', '', '**grazie** per [la](https://x.y) risposta.', '```'].join('\n'));
+
+    expect(html).toContain('<div class="copy-block copy-card"><p class="copy-card-text">Gentile Mario,\n\n**grazie** per [la](https://x.y) risposta.</p>');
+    expect(html).toContain('aria-label="Copia il testo"');
+    expect(html).not.toContain('<pre');
+    expect(html).not.toContain('<strong>');
+  });
+
+  it('gives every other code block a copy button too', () => {
+    const html = render(['```js', 'const a = 1;', '```'].join('\n'));
+    expect(html).toContain('<div class="copy-block copy-code"><pre><code class="language-js">const a = 1;');
+    expect(html).toContain('aria-label="Copia il codice"');
   });
 });
