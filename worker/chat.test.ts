@@ -15,7 +15,9 @@ import {
 import { titleFrom } from './conversations';
 import type { ChatMessage, CompletionOptions, ProviderRouter } from './llm/router';
 import {
+  ABOUT_KERN_DETAILS,
   applyReview,
+  asksAboutKern,
   DEEP_INSTRUCTION,
   DOCUMENT_SYSTEM_PROMPT,
   IMAGE_PROMPT_SYSTEM_PROMPT,
@@ -506,6 +508,41 @@ describe('parseImagePlan', () => {
     ['a plan without a verdict', '{"prompt":"a cat"}'],
   ])('rejects %s', (_label, raw) => {
     expect(parseImagePlan(raw)).toBeNull();
+  });
+});
+
+describe('self-description', () => {
+  it.each([
+    'Cosa sei?',
+    'Che cosa sai fare?',
+    'Cosa ti differenzia da ChatGPT?',
+    'Quali modelli usi?',
+    'Che profili ci sono?',
+    'Quali sono i limiti giornalieri?',
+    'Quanti messaggi posso mandare?',
+    "Cos'è Fonti?",
+    'A cosa serve Ragiona?',
+    'Il microfono non compare',
+    'Chi ha creato Kern?',
+  ])('recognises a question about Kern: %s', (question) => {
+    expect(asksAboutKern(question)).toBe(true);
+  });
+
+  it.each(['Risolvi 2x + 5 = 13', 'Chi era Cavour?', 'Scrivi una mail al condominio', 'Cosa sono i cherni?'])(
+    'ignores an unrelated question: %s',
+    (question) => {
+      expect(asksAboutKern(question)).toBe(false);
+    },
+  );
+
+  it('sends the details only with a question about Kern', async () => {
+    const about = fakeRouters();
+    await respond(about.routers, [], 'Cosa sai fare?');
+    expect(about.draftComplete.mock.calls[0][0][0].content).toBe(`${SYSTEM_PROMPT}\n${ABOUT_KERN_DETAILS}`);
+
+    const other = fakeRouters();
+    await respond(other.routers, [], 'Chi era Cavour?');
+    expect(other.draftComplete.mock.calls[0][0][0].content).toBe(SYSTEM_PROMPT);
   });
 });
 

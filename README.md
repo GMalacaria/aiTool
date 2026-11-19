@@ -12,26 +12,60 @@ Success metric: **question solved, chat closed**.
 
 ## Status
 
-Early stage — working MVP, used by one family (no plan to open it to the public for now). Deployed on Cloudflare Workers.
+Early stage — working MVP, used by one family (no plan to open it to the public for now). Deployed on Cloudflare Workers. Installable on phones as a PWA.
 
-- Google sign-in; new accounts wait for an administrator's approval; signed-out visitors see the chat with an anonymous sidebar, and trying to use it asks them to sign in;
-- ChatGPT-style sidebar: chat search, rename and delete, account menu (Profilo, Impostazioni, Utenti for administrators), light/dark theme;
-- daily message limit per person;
-- chat through an OpenAI-compatible provider router, with optional free-tier fallbacks (Groq, Gemini) when OpenAI fails;
-- every answer goes through a second "anti-sycophancy" review call;
-- "Risposta più approfondita": a per-message option that uses a stronger model, with its own small daily allowance;
-- conversation history stored per account, deletable by the user (single chat, all chats, whole account); the model has no memory across conversations;
-- answers formatted in Markdown (tables, lists, code blocks) and shown in the chat;
-- images on explicit request ("genera un'immagine di…") and edits of attached or generated images ("rendila in bianco e nero"), checked by a content filter, kept per account and deletable with the chat;
-- files on explicit request only ("fammi un PDF…", "crea un documento Excel…"): the model describes a document (text, lists, tables, bar/line/pie charts, quizzes with answer key) and the app renders it and exports it to PDF and Excel on the device;
-- "Allega": images and PDFs can be attached to a question. They are processed on the device (images downscaled, PDF text extracted, scanned pages turned into images); the extracted PDF text and the attached images are stored with the conversation (so they can be asked about and edited later), the original PDF files never are;
-- fixed answers pointing to real services for sensitive topics (never stored);
-- per-user daily budgets (messages, in-depth answers, images, paid tokens) with a usage and cost log; past the token budget, answers come from free models and the user is told;
-- two profiles: professional, and student (a tutor that guides to the solution instead of giving it);
-- a fixed reminder that this is a tool, not a person, after every 10th question of a conversation;
-- installable as a PWA.
+Access: Google sign-in; new accounts wait for an administrator's approval. Signed-out visitors see the chat, and trying to use it asks them to sign in.
 
-In development: **verified sources** — factual answers searched on the web, each fact marked with a numbered source (or `[?]` when no source confirms it) and checked by a second, independent model.
+## What it does
+
+- **Answers** in Markdown: tables, lists, code blocks, and diagrams (flowcharts, timelines, mind maps…) drawn in the chat. Text meant to be used elsewhere (an email, a message) comes in a card with a copy button.
+- **Fonti** (verified sources): a switch next to the request field. For factual questions the answer is searched on the web, every fact gets a numbered source with a link, and a second, independent model checks each fact against the page; `[?]` marks a fact no source confirms. Answers take about 10–20 seconds. Without the switch, a factual answer offers a "Verifica fonti" button.
+- **Ragiona** (selector "Normale / Ragiona"): a more in-depth answer from a stronger model, with its own small daily allowance.
+- **Microphone** (professional profile only): dictation of the request; the text appears while speaking, is never sent automatically, and the audio is not stored.
+- **Attachments** ("+"): images and PDFs, prepared on the device (images downscaled, PDF text extracted, scanned pages turned into images). The PDF text and the images are kept with the chat so follow-up questions work; the original PDF file never is.
+- **Documents** on explicit request only ("fammi un PDF…", "crea un file Excel…"): text, tables, charts, quizzes and diagrams, exported to PDF and Excel on the device.
+- **Images** on explicit request only ("genera un'immagine di…") and edits of attached or generated images ("rendila in bianco e nero"), behind a content filter that fails closed.
+- **Maps and videos** when asked to show something real ("mostrami la mappa di Roma"); photos of real products are never shown (copyright), a link to the official page is given instead. Explanations may include up to three freely licensed pictures from Wikimedia Commons, with author and licence.
+- **User context**: a short list of facts the user chose to share (job, school, preferred format), visible and editable in Profilo, with history and a pause switch.
+- ChatGPT-style sidebar with chat search, rename and delete; light/dark theme.
+
+## Profiles
+
+Set per person by an administrator.
+
+- **Professional** (default): direct answers; all features, including dictation.
+- **Student**: a tutor. It explains the method, gives the next step and checks the student's attempts, but never hands over the solution of homework, exercises, tests, translations or essays (documents become study guides). Plain factual questions are still answered directly. No dictation.
+
+## Daily limits
+
+Each person has daily limits, editable by administrators and shown under the request field and in Profilo:
+
+| Limit | Default |
+|---|---|
+| Messages | 15 |
+| "Ragiona" answers | 3 |
+| Images | 3 |
+| Paid tokens | 100,000 |
+
+- Past the token budget the user is in **free mode** until midnight (Italian time): answers come from free models (Groq, Gemini) and are labelled; "Ragiona", attachments and "Fonti" are off. When the free models are exhausted too, the app says to come back tomorrow.
+- A chat holds at most 30 requests; the last five are counted down.
+- Web search for "Fonti" has an app-wide daily cap, paid by the owner and not counted against the user.
+
+## How it stays a tool
+
+- Every answer goes through a second "anti-sycophancy" review call that removes flattery and agreement with mistakes.
+- No personality, human name, avatar or voice replies; no "is typing…".
+- No memory across chats (only the user context above).
+- A fixed note after every 10th question reminds that this is a tool, not a person.
+- Sensitive topics (mental health, self-harm, violence) get a fixed answer pointing to real services, never stored.
+- Asked "cosa sei?" or "cosa sai fare?", Kern describes its principles, features, profiles and limits briefly and without self-praise.
+- No advertising, no data selling.
+
+## Data
+
+- Conversations are stored per account (Cloudflare D1, EU) and can be deleted: one chat, all chats, or the whole account. Images are stored in R2 (EU) and deleted with their chat.
+- Usage is logged per request (tokens, images, estimated cost, providers), never the message content.
+- Models: OpenAI for answers, Google Nano Banana for images, Gemini for source checks, free Groq/Gemini models as fallback. Free models never receive attachments or the user context.
 
 ## Development
 

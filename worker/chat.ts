@@ -17,6 +17,8 @@ import {
   buildReviewInput,
   DEEP_INSTRUCTION,
   DOCUMENT_SYSTEM_PROMPT,
+  ABOUT_KERN_DETAILS,
+  asksAboutKern,
   INTENT_SYSTEM_PROMPT,
   IMAGE_PROMPT_SYSTEM_PROMPT,
   IMAGE_REFUSAL_FALLBACK,
@@ -581,6 +583,7 @@ async function searchText(
   const context = activeContext(routers);
   const systemPrompt = [
     SYSTEM_PROMPT,
+    ...(asksAboutKern(question) ? [ABOUT_KERN_DETAILS] : []),
     SEARCH_INSTRUCTION,
     ...(routers.deep ? [DEEP_INSTRUCTION] : []),
     ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
@@ -606,6 +609,7 @@ function draftText(
   const context = activeContext(routers);
   const systemPrompt = [
     SYSTEM_PROMPT,
+    ...(asksAboutKern(question) ? [ABOUT_KERN_DETAILS] : []),
     ...(routers.deep ? [DEEP_INSTRUCTION] : []),
     ...(routers.profile === 'student' ? [STUDENT_INSTRUCTION] : []),
     ...(context ? [contextInstruction(context)] : []),
