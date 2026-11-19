@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { hasTabularData, isNumericColumn, type DocumentBlock, type DocumentSpec } from '../../shared/document';
+import { Diagram } from '../diagrams/Diagram';
 import { chartSvg, formatNumber } from './chart';
 import { DATA_DISCLAIMER, downloadBlob, fileName } from './files';
 
@@ -71,6 +72,13 @@ function Block({ block, firstQuestion }: { block: DocumentBlock; firstQuestion: 
       );
     case 'chart':
       return <Chart block={block} />;
+    case 'diagram':
+      return (
+        <figure className="doc-diagram">
+          {block.title && <figcaption>{block.title}</figcaption>}
+          <Diagram code={block.code} label={block.title || 'Schema'} />
+        </figure>
+      );
     case 'quiz':
       return (
         <ol className="doc-quiz" start={firstQuestion}>

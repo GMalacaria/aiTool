@@ -13,12 +13,25 @@ describe('parseDocument', () => {
         { type: 'table', title: 'Costs', columns: ['Item', 'Cost'], rows: [['Rent', 800]] },
         { type: 'chart', chart: 'bar', title: 'Costs', labels: ['Rent'], series: [{ name: 'EUR', values: [800] }] },
         { type: 'quiz', questions: [{ question: '2+2?', options: ['3', '4'], answer: '4' }] },
+        { type: 'diagram', title: 'Flusso', code: 'flowchart TD\n  A["Inizio"] --> B["Fine"]' },
       ],
     };
 
     const expected = { ...input, title: 'Report' };
     expect(parseDocument(input)).toEqual(expected);
     expect(parseDocument(JSON.stringify(input))).toEqual(expected);
+  });
+
+  it('unwraps fenced diagram sources and drops empty or oversized ones', () => {
+    const parsed = parseDocument({
+      blocks: [
+        { type: 'diagram', title: 'A', code: '```mermaid\nflowchart TD\n  A --> B\n```' },
+        { type: 'diagram', title: 'B', code: '   ' },
+        { type: 'diagram', title: 'C', code: 'x'.repeat(DOCUMENT_LIMITS.diagramChars + 1) },
+        { type: 'diagram', title: 'D', code: 42 },
+      ],
+    });
+    expect(parsed?.blocks).toEqual([{ type: 'diagram', title: 'A', code: 'flowchart TD\n  A --> B' }]);
   });
 
   it('defaults the title and treats data as not provided by the user', () => {

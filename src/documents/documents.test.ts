@@ -112,3 +112,33 @@ describe('fitWithin', () => {
     expect(fitWithin(3000, 10, 1000)).toEqual({ width: 1000, height: 3 });
   });
 });
+
+describe('PDF diagrams', async () => {
+  const { buildDefinition, diagramSize } = await import('./pdf');
+
+  it('keeps the natural size and shrinks big diagrams to the page', () => {
+    expect(diagramSize({ width: 400, height: 200 })).toEqual({ width: 300, height: 150 });
+    const wide = diagramSize({ width: 2000, height: 500 });
+    expect(wide.width).toBeCloseTo(499);
+    expect(wide.height).toBeCloseTo(124.75);
+    const tall = diagramSize({ width: 300, height: 2000 });
+    expect(tall.height).toBeCloseTo(640);
+  });
+
+  it('places the drawn picture, or a note when it could not be drawn', () => {
+    const document = parseDocument({
+      title: 'Schemi',
+      blocks: [
+        { type: 'diagram', title: 'Uno', code: 'flowchart TD\n  A --> B' },
+        { type: 'diagram', title: 'Due', code: 'flowchart TD\n  C --> D' },
+      ],
+    })!;
+    const images = new Map([
+      [document.blocks[0], { dataUrl: 'data:image/png;base64,AAAA', width: 400, height: 200 }],
+      [document.blocks[1], null],
+    ]);
+    const content = JSON.stringify(buildDefinition(document, new Date(0), images).content);
+    expect(content).toContain('"image":"data:image/png;base64,AAAA","width":300,"height":150');
+    expect(content).toContain('Schema non disponibile in questo file.');
+  });
+});

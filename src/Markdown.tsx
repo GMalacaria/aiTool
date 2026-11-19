@@ -3,6 +3,8 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm';
 import { parseMarkerHref, type AnswerSources } from '../shared/sources';
 import { CopyBlock } from './CopyBlock';
+import { Diagram } from './diagrams/Diagram';
+import { DIAGRAM_LANGUAGE } from './diagrams/source';
 import { MarkerView, SourceLegend, UncheckedNotice } from './Sources';
 
 /** The fence language that marks text ready to paste elsewhere (see SYSTEM_PROMPT). */
@@ -16,12 +18,24 @@ function textOf(node: HastNode | HastNode['children'][number]): string {
   return 'children' in node ? node.children.map((child) => textOf(child as HastNode)).join('') : '';
 }
 
-/** A fenced block: ```copy becomes a card, any other a code block; both with a copy icon. */
+/**
+ * A fenced block with a copy icon: ```copy becomes a card, ```mermaid a diagram
+ * (the icon copies its source), any other a code block.
+ */
 function CodeBlock({ node, children }: { node?: HastNode; children?: React.ReactNode }) {
   const code = node?.children.find((child) => child.type === 'element' && child.tagName === 'code');
   const classes = code?.type === 'element' ? code.properties.className : undefined;
-  const isCard = Array.isArray(classes) && classes.includes(`language-${COPY_LANGUAGE}`);
+  const language = (name: string) => Array.isArray(classes) && classes.includes(`language-${name}`);
+  const isCard = language(COPY_LANGUAGE);
   const text = (code ? textOf(code) : '').replace(/\n$/, '');
+
+  if (language(DIAGRAM_LANGUAGE)) {
+    return (
+      <CopyBlock text={text} variant="diagram">
+        <Diagram code={text} label="Schema" />
+      </CopyBlock>
+    );
+  }
 
   return isCard ? (
     <CopyBlock text={text} variant="card">

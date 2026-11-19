@@ -24,7 +24,9 @@ export type DocumentBlock =
   | { type: 'list'; ordered: boolean; items: string[] }
   | { type: 'table'; title: string; columns: string[]; rows: Cell[][] }
   | { type: 'chart'; chart: ChartKind; title: string; labels: string[]; series: ChartSeries[] }
-  | { type: 'quiz'; questions: QuizQuestion[] };
+  | { type: 'quiz'; questions: QuizQuestion[] }
+  /** A Mermaid diagram (flowchart, mind map, timeline…): `code` is its source, drawn by the app. */
+  | { type: 'diagram'; title: string; code: string };
 
 export interface DocumentSpec {
   title: string;
@@ -44,6 +46,7 @@ export const DOCUMENT_LIMITS = {
   chartSeries: 6,
   quizQuestions: 50,
   quizOptions: 8,
+  diagramChars: 4000,
 } as const;
 
 const CHART_KINDS: ChartKind[] = ['bar', 'line', 'pie'];
@@ -130,6 +133,16 @@ function block(value: unknown): DocumentBlock | null {
         }))
         .filter((entry) => entry.question);
       return questions.length ? { type: 'quiz', questions } : null;
+    }
+    case 'diagram': {
+      // Models sometimes wrap the source in a code fence: keep only what is inside.
+      const raw = typeof value.code === 'string' ? value.code : '';
+      const code = raw
+        .trim()
+        .replace(/^```[\w-]*[^\S\n]*\n?|\n?```$/g, '')
+        .trim();
+      if (!code || code.length > L.diagramChars) return null;
+      return { type: 'diagram', title: text(value.title, L.shortTextChars), code };
     }
     default:
       return null;
