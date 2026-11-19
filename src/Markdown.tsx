@@ -85,9 +85,12 @@ export function Markdown({
   text,
   sources,
   onVerify,
+  typing = false,
 }: {
   text: string;
   sources?: AnswerSources;
+  /** The text is still being revealed: the legend and the notice wait for the end. */
+  typing?: boolean;
   /** Checks the sources of an unchecked answer; false when it failed. */
   onVerify?: () => Promise<boolean>;
 }) {
@@ -116,7 +119,7 @@ export function Markdown({
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={withMarkers}>
         {text}
       </ReactMarkdown>
-      {sources?.unchecked ? (
+      {typing ? null : sources?.unchecked ? (
         <UncheckedNotice onVerify={onVerify} />
       ) : (
         sources && <SourceLegend sources={sources} unreadable={unreadable} />

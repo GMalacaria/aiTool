@@ -200,6 +200,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
         {
           id: result.messageId ?? undefined,
           role: 'assistant',
+          animate: true,
           content: result.answer,
           document: result.document,
           image: result.image,
@@ -242,7 +243,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
     try {
       const checked = await verifyMessage(id);
       setMessages((list) =>
-        list.map((message) => (message.id === id ? { ...message, content: checked.content, sources: checked.sources } : message)),
+        list.map((message) => (message.id === id ? { ...message, animate: false, content: checked.content, sources: checked.sources } : message)),
       );
       return true;
     } catch (cause) {
@@ -267,7 +268,7 @@ export function Workspace({ account, onSignOut, onSignedOut }: WorkspaceProps) {
   async function undoContext(messageId: number): Promise<'done' | 'changed' | 'failed'> {
     try {
       const update = await undoContextUpdate(messageId);
-      setMessages((list) => list.map((message) => (message.id === messageId ? { ...message, contextUpdate: update } : message)));
+      setMessages((list) => list.map((message) => (message.id === messageId ? { ...message, animate: false, contextUpdate: update } : message)));
       return 'done';
     } catch (cause) {
       if (cause instanceof ApiError && cause.code === 'context_changed') return 'changed';
