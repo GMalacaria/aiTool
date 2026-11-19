@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { EMPTY_ATTACHMENTS, hasAttachments, type Attachments } from '../shared/attachments';
 import type { ConversationMessage } from './api';
 import { DictationError, startLiveDictation, type DictationEnd, type LiveDictation } from './dictation/live';
@@ -14,6 +14,7 @@ import { Markdown } from './Markdown';
 import { REMINDER_TEXT, reminderAfter } from './reminder';
 import { CloseIcon, MicIcon, PlusIcon, ReasonIcon, SendIcon, StopIcon, VerifiedIcon } from './ui/icons';
 import { RotatingText } from './ui/RotatingText';
+import { useTypewriter } from './typewriter';
 
 interface ChatProps {
   messages: ConversationMessage[];
@@ -96,6 +97,32 @@ function readVerifyChoice(): boolean {
   } catch {
     return false;
   }
+}
+
+/** An answer's text, typed out when it has just arrived; what follows it appears once it is complete. */
+function TypedAnswer({
+  message,
+  onGrow,
+  onVerifySources,
+  children,
+}: {
+  message: ConversationMessage;
+  onGrow: () => void;
+  onVerifySources: ChatProps['onVerifySources'];
+  children: ReactNode;
+}) {
+  const { shown, done } = useTypewriter(message.content, message.animate === true, message, onGrow);
+  return (
+    <div aria-busy={!done}>
+      <Markdown
+        text={shown}
+        sources={message.sources}
+        typing={!done}
+        onVerify={message.id !== undefined ? () => onVerifySources(message.id as number) : undefined}
+      />
+      {done && children}
+    </div>
+  );
 }
 
 function Loading({ withSources }: { withSources: boolean }) {
@@ -453,6 +480,31 @@ export function Chat({
     </form>
   );
 
+  /** Keeps the end of the thread in view while an answer is being typed, unless the reader scrolled up. */
+  function keepEndInView() {
+    const end = endRef.current;
+    if (!end) return;
+    const { top } = end.getBoundingClientRect();
+    if (top < window.innerHeight + 160) end.scrollIntoView({ block: 'end' });
+  }
+
+  /** What follows an answer's text: the context change, pictures and the map or video. */
+  function extras(message: ConversationMessage) {
+    if (message.role !== 'assistant') return null;
+    return (
+      <>
+        {message.contextUpdate && (
+          <ContextNote
+            update={message.contextUpdate}
+            onUndo={message.id !== undefined ? () => onUndoContext(message.id as number) : undefined}
+          />
+        )}
+        {message.illustrations && <Illustrations items={message.illustrations} />}
+        {message.media && <MediaView media={message.media} />}
+      </>
+    );
+  }
+
   if (empty) {
     return (
       <main className="chat-start">
@@ -477,22 +529,13 @@ export function Chat({
                 ) : message.image ? (
                   <GeneratedImage id={message.image.id} request={messages[index - 1]?.content ?? ''} />
                 ) : message.role === 'assistant' ? (
-                  <Markdown
-                    text={message.content}
-                    sources={message.sources}
-                    onVerify={message.id !== undefined ? () => onVerifySources(message.id as number) : undefined}
-                  />
+                  <TypedAnswer message={message} onGrow={keepEndInView} onVerifySources={onVerifySources}>
+                    {extras(message)}
+                  </TypedAnswer>
                 ) : (
                   <p>{message.content}</p>
                 )}
-                {message.role === 'assistant' && message.contextUpdate && (
-                  <ContextNote
-                    update={message.contextUpdate}
-                    onUndo={message.id !== undefined ? () => onUndoContext(message.id as number) : undefined}
-                  />
-                )}
-                {message.role === 'assistant' && message.illustrations && <Illustrations items={message.illustrations} />}
-                {message.role === 'assistant' && message.media && <MediaView media={message.media} />}
+                {(message.document || message.image) && extras(message)}
                 {message.role === 'assistant' && message.freeModel && (
                   <p className="free-model-note">Risposta da un modello gratuito, meno accurato.</p>
                 )}

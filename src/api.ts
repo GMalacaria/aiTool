@@ -42,6 +42,8 @@ export interface ConversationMessage {
   image?: { id: string };
   /** The answer was written by a free-tier model. */
   freeModel?: boolean;
+  /** Just received: the text is revealed progressively instead of appearing at once. */
+  animate?: boolean;
   /** Names of the files attached to a question. */
   attachments?: AttachmentNames;
   /** Verified sources: the legend for the markers in the text. */
